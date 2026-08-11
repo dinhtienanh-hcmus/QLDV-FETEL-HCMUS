@@ -69,6 +69,7 @@ export default function AdminScreen() {
   const [usersList, setUsersList] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState('');
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
   const [searchBch, setSearchBch] = useState('');
 
   const [branches, setBranches] = useState<any[]>([]);
@@ -1144,26 +1145,46 @@ export default function AdminScreen() {
             </div>
 
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <div className="flex justify-between items-center mb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center">
                   <List size={16} className="mr-1.5 text-blue-600"/> Danh sách tài khoản hệ thống ({usersList.length})
                 </h3>
+                {selectedBranchFilter && (
+                  <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full w-fit">
+                    Lớp {selectedBranchFilter}: {usersList.filter(u => (u.branch || '').toLowerCase() === selectedBranchFilter.toLowerCase()).length} tài khoản
+                  </span>
+                )}
               </div>
 
-              <input 
-                type="text" 
-                placeholder="Tìm kiếm theo Họ tên, Email, MSSV, Chi đoàn..." 
-                className="w-full text-xs p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none mb-3"
-                value={userSearch}
-                onChange={e => setUserSearch(e.target.value)}
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                <input 
+                  type="text" 
+                  placeholder="Tìm kiếm theo Họ tên, Email, MSSV..." 
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500"
+                  value={userSearch}
+                  onChange={e => setUserSearch(e.target.value)}
+                />
+                <select
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 cursor-pointer font-medium text-slate-700"
+                  value={selectedBranchFilter}
+                  onChange={e => setSelectedBranchFilter(e.target.value)}
+                >
+                  <option value="">-- Tất cả Chi đoàn / Lớp --</option>
+                  {Array.from(new Set([...branches.map(b => b.name), ...DEFAULT_BRANCHES])).map(b => (
+                    <option key={b} value={b}>Chi đoàn {b}</option>
+                  ))}
+                </select>
+              </div>
 
               {loadingUsers ? (
-                <p className="text-xs text-center text-slate-500">Đang tải...</p>
+                <p className="text-xs text-center text-slate-500 py-4">Đang tải danh sách tài khoản...</p>
               ) : (
-                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1 no-scrollbar">
+                <div className="space-y-2 max-h-[550px] overflow-y-auto pr-1 no-scrollbar">
                    {usersList
                     .filter((u: any) => {
+                      if (selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
+                        return false;
+                      }
                       const q = userSearch.toLowerCase().trim();
                       if (!q) return true;
                       return (
@@ -1175,14 +1196,28 @@ export default function AdminScreen() {
                       );
                     })
                     .map((u: any) => (
-                      <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                      <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100/80 transition-all">
                          <div>
                             <div className="text-xs font-bold text-slate-800">{u.name || 'Chưa cập nhật tên'} <span className="opacity-70 font-normal">({u.username || u.email || u.id})</span></div>
-                            <div className="text-[10px] text-slate-500 mt-1">
-                               {u.role === 'admin' ? 'QTV' : u.role === 'chidoan' ? 'BCH' : 'ĐV'} • {u.branch || 'Đoàn trường'} {u.email ? `• ${u.email}` : ''}
+                            <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
+                               <span className="font-semibold text-blue-700">{u.role === 'admin' ? 'QTV Khoa' : u.role === 'chidoan' ? 'BCH Chi đoàn' : 'Đoàn viên'}</span>
+                               <span>•</span>
+                               <span className="bg-slate-200/70 text-slate-700 px-1.5 py-0.5 rounded font-medium">{u.branch || 'Chưa phân lớp'}</span>
+                               {u.mssv && (
+                                 <>
+                                   <span>•</span>
+                                   <span>MSSV: {u.mssv}</span>
+                                 </>
+                               )}
+                               {u.email && (
+                                 <>
+                                   <span>•</span>
+                                   <span className="truncate max-w-[180px]">{u.email}</span>
+                                 </>
+                               )}
                             </div>
                          </div>
-                         <div className="flex items-center gap-1.5">
+                         <div className="flex items-center gap-1.5 shrink-0">
                             <button onClick={() => handleEditUser(u)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
                                <Edit2 size={12} className="mr-1" /> Sửa
                             </button>
@@ -1193,6 +1228,9 @@ export default function AdminScreen() {
                       </div>
                    ))}
                    {usersList.filter((u: any) => {
+                      if (selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
+                        return false;
+                      }
                       const q = userSearch.toLowerCase().trim();
                       if (!q) return true;
                       return (
@@ -1203,7 +1241,7 @@ export default function AdminScreen() {
                         (u.branch || '').toLowerCase().includes(q)
                       );
                     }).length === 0 && (
-                      <p className="text-xs text-center text-slate-400 py-4 italic">Không tìm thấy tài khoản phù hợp.</p>
+                      <p className="text-xs text-center text-slate-400 py-6 italic">Không tìm thấy tài khoản phù hợp theo tìm kiếm/lớp đã chọn.</p>
                    )}
                 </div>
               )}

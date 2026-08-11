@@ -16,8 +16,11 @@ service cloud.firestore {
     // Role checks
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
     function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      return isSignedIn() && (
+        (request.auth.token.email != null && request.auth.token.email.lower() in ['dinhtienanh.hcmus@gmail.com', 'dkdtvt.hcmus@gmail.com', 'dinhtienanh235@gmail.com']) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
     }
     function getUserRole() {
        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
@@ -77,17 +80,9 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn(); // Allow all to read for basic profile finding
-      allow create: if (isOwner(userId) || isAdmin()) && isValidId(userId) && (
-        incoming().role == 'doanvien' ||
-        incoming().role == 'chidoan' ||
-        (incoming().role == 'admin' && incoming().email.lower() in ['dinhtienanh.hcmus@gmail.com', 'dkdtvt.hcmus@gmail.com'])
-      );
-      allow update: if isSignedIn() && isValidUser(incoming()) && (
-        isAdmin() ||
-        (isOwner(userId) && incoming().email.lower() in ['dinhtienanh.hcmus@gmail.com', 'dkdtvt.hcmus@gmail.com']) ||
-        (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'avatar', 'branch', 'mssv', 'updatedAt']))
-      );
-      allow delete: if isAdmin();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (isAdmin() || isOwner(userId));
+      allow delete: if isAdmin() || isOwner(userId);
     }
 
     match /bch_members/{memberId} {

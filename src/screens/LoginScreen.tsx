@@ -162,7 +162,7 @@ export default function LoginScreen() {
               <div className="text-center py-2">
                 <h2 className="text-base font-bold text-slate-800">Cổng đăng nhập Đoàn viên</h2>
                 <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                  Đoàn viên đăng nhập nhanh bằng tài khoản Google (Sinh viên HCMUS / Gmail cá nhân) để liên kết thông tin.
+                  Đoàn viên đăng nhập trực tiếp bằng <strong>Gmail cá nhân</strong>. Không cần sử dụng email sinh viên HCMUS.
                 </p>
               </div>
 
