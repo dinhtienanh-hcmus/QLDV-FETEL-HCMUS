@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { db, auth } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, orderBy, getDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
+import { isTermExpired } from '../utils/termUtils';
 
 interface Organizer {
   mssv: string;
@@ -86,9 +87,10 @@ export default function HomeScreen() {
   
   const isDoanKhoaAccount = currentUser?.role === 'admin';
   
-  // Filter BCH Đoàn khoa and BCH Chi đoàn
+  // Filter BCH Đoàn khoa and BCH Chi đoàn (excluding expired terms/periods)
   const bchDoanKhoa = bchMembers.filter(m => {
     if (!m.committeeRole || m.committeeRole.trim() === '') return false;
+    if (isTermExpired(m.committeeTerm) || isTermExpired(m.committeePeriod)) return false;
     const r = m.committeeRole.toLowerCase();
     // Exclude pure Chi doan specific roles unless it also mentions Đoàn khoa or BTV/Thường vụ
     if (r.includes('chi đoàn') && !r.includes('đoàn khoa') && !r.includes('btv') && !r.includes('thường vụ')) {
@@ -101,6 +103,7 @@ export default function HomeScreen() {
     ? bchMembers.filter(m => {
         const isUserBranch = (m.branch || '').toLowerCase() === (currentUser.branch || '').toLowerCase();
         if (!isUserBranch) return false;
+        if (isTermExpired(m.branchTerm)) return false;
 
         const branchRole = (m.branchRole || '').trim();
         const committeeRole = (m.committeeRole || '').trim().toLowerCase();

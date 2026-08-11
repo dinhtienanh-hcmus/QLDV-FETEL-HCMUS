@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { db, firebaseConfig } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
+import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS } from '../utils/termUtils';
 
 interface Organizer {
   mssv: string;
@@ -111,6 +112,16 @@ export default function AdminScreen() {
 
   const [editingBchUser, setEditingBchUser] = useState<any>(null);
   const [bchModalTab, setBchModalTab] = useState<'doankhoa' | 'chidoan'>('doankhoa');
+  
+  // Dynamic terms & periods state
+  const [doanKhoaTerms, setDoanKhoaTerms] = useState<string[]>(DEFAULT_DOAN_KHOA_TERMS);
+  const [doanKhoaPeriods, setDoanKhoaPeriods] = useState<string[]>(DEFAULT_DOAN_KHOA_PERIODS);
+  const [chiDoanTerms, setChiDoanTerms] = useState<string[]>(DEFAULT_CHI_DOAN_TERMS);
+
+  const [showAddTermModal, setShowAddTermModal] = useState(false);
+  const [addTermType, setAddTermType] = useState<'dk_term' | 'dk_period' | 'cd_term'>('dk_term');
+  const [newTermInput, setNewTermInput] = useState('');
+
   const [bchForm, setBchForm] = useState({
     committeeRole: '',
     branchRole: '',
@@ -133,11 +144,105 @@ export default function AdminScreen() {
   useEffect(() => {
     fetchActivities();
     fetchUsers();
+    fetchBchTerms();
     if (isAdmin) {
       fetchHandbookTopics();
       fetchBranches();
     }
   }, [currentUser, isAdmin]);
+
+  const fetchBchTerms = async () => {
+    try {
+      const termsDocRef = doc(db, 'system', 'bch_terms');
+      const termsDocSnap = await getDoc(termsDocRef);
+
+      let dkTerms = DEFAULT_DOAN_KHOA_TERMS;
+      let dkPeriods = DEFAULT_DOAN_KHOA_PERIODS;
+      let cdTerms = DEFAULT_CHI_DOAN_TERMS;
+
+      if (termsDocSnap.exists()) {
+        const data = termsDocSnap.data();
+        if (Array.isArray(data.doanKhoaTerms)) dkTerms = Array.from(new Set([...dkTerms, ...data.doanKhoaTerms]));
+        if (Array.isArray(data.doanKhoaPeriods)) dkPeriods = Array.from(new Set([...dkPeriods, ...data.doanKhoaPeriods]));
+        if (Array.isArray(data.chiDoanTerms)) cdTerms = Array.from(new Set([...cdTerms, ...data.chiDoanTerms]));
+      }
+
+      // Filter out expired terms/periods (passing October cutoff of end year)
+      const activeDkTerms = filterActiveTerms(dkTerms);
+      const activeDkPeriods = filterActiveTerms(dkPeriods);
+      const activeCdTerms = filterActiveTerms(cdTerms);
+
+      if (activeDkTerms.length === 0) activeDkTerms.push('2025-2027');
+      if (activeDkPeriods.length === 0) activeDkPeriods.push('2026-2027');
+      if (activeCdTerms.length === 0) activeCdTerms.push('2026-2027');
+
+      setDoanKhoaTerms(activeDkTerms);
+      setDoanKhoaPeriods(activeDkPeriods);
+      setChiDoanTerms(activeCdTerms);
+
+      // Sync active cleaned list to Firestore
+      await setDoc(termsDocRef, {
+        doanKhoaTerms: activeDkTerms,
+        doanKhoaPeriods: activeDkPeriods,
+        chiDoanTerms: activeCdTerms,
+        updatedAt: Date.now()
+      }, { merge: true });
+    } catch (e) {
+      console.error("Lỗi tải/dọn dẹp danh sách nhiệm kỳ:", e);
+    }
+  };
+
+  const handleAddNewTerm = async () => {
+    if (!newTermInput.trim()) return;
+    const termStr = newTermInput.trim();
+    
+    // Validate format YYYY-YYYY or YYYY - YYYY
+    const regex = /^\d{4}\s*-\s*\d{4}$/;
+    if (!regex.test(termStr)) {
+      alert("Vui lòng nhập đúng định dạng Năm-Năm (VD: 2027-2029)");
+      return;
+    }
+
+    if (isTermExpired(termStr)) {
+      alert("Nhiệm kỳ/Giai đoạn này đã hết hạn (sau mốc tháng 10 của năm kết thúc)!");
+      return;
+    }
+
+    try {
+      let updatedDkTerms = [...doanKhoaTerms];
+      let updatedDkPeriods = [...doanKhoaPeriods];
+      let updatedCdTerms = [...chiDoanTerms];
+
+      if (addTermType === 'dk_term') {
+        updatedDkTerms = filterActiveTerms([...updatedDkTerms, termStr]);
+        setDoanKhoaTerms(updatedDkTerms);
+        setBchForm(prev => ({ ...prev, committeeTerm: termStr }));
+      } else if (addTermType === 'dk_period') {
+        updatedDkPeriods = filterActiveTerms([...updatedDkPeriods, termStr]);
+        setDoanKhoaPeriods(updatedDkPeriods);
+        setBchForm(prev => ({ ...prev, committeePeriod: termStr }));
+      } else if (addTermType === 'cd_term') {
+        updatedCdTerms = filterActiveTerms([...updatedCdTerms, termStr]);
+        setChiDoanTerms(updatedCdTerms);
+        setBchForm(prev => ({ ...prev, branchTerm: termStr }));
+      }
+
+      const termsDocRef = doc(db, 'system', 'bch_terms');
+      await setDoc(termsDocRef, {
+        doanKhoaTerms: updatedDkTerms,
+        doanKhoaPeriods: updatedDkPeriods,
+        chiDoanTerms: updatedCdTerms,
+        updatedAt: Date.now()
+      }, { merge: true });
+
+      setNewTermInput('');
+      setShowAddTermModal(false);
+      alert(`Đã thêm mới thành công: ${termStr}`);
+    } catch (e) {
+      console.error(e);
+      alert("Có lỗi khi thêm nhiệm kỳ mới.");
+    }
+  };
 
   const fetchBranches = async () => {
     try {
@@ -218,8 +323,44 @@ export default function AdminScreen() {
     setLoadingUsers(true);
     try {
       const snapshot = await getDocs(collection(db, 'users'));
-      const u = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUsersList(u);
+      const rawUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      
+      const cleanedUsers = rawUsers.map(usr => {
+        let modified = false;
+        let cTerm = usr.committeeTerm;
+        let cPeriod = usr.committeePeriod;
+        let bTerm = usr.branchTerm;
+
+        if (cTerm && isTermExpired(cTerm)) {
+          cTerm = null;
+          modified = true;
+        }
+        if (cPeriod && isTermExpired(cPeriod)) {
+          cPeriod = null;
+          modified = true;
+        }
+        if (bTerm && isTermExpired(bTerm)) {
+          bTerm = null;
+          modified = true;
+        }
+
+        if (modified) {
+          updateDoc(doc(db, 'users', usr.id), {
+            committeeTerm: cTerm,
+            committeePeriod: cPeriod,
+            branchTerm: bTerm
+          }).catch(console.error);
+        }
+
+        return {
+          ...usr,
+          committeeTerm: cTerm,
+          committeePeriod: cPeriod,
+          branchTerm: bTerm
+        };
+      });
+
+      setUsersList(cleanedUsers);
     } catch (e) {
       console.error(e);
     } finally {
@@ -1567,31 +1708,50 @@ export default function AdminScreen() {
                    </div>
 
                    <div>
-                      <label className="text-xs font-semibold text-slate-600 mb-1 block">Nhiệm kỳ Đoàn khoa / LCH</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs font-semibold text-slate-600">Nhiệm kỳ Đoàn khoa / LCH</label>
+                        {(isAdmin || currentUser?.role === 'admin') && (
+                          <button 
+                            type="button" 
+                            onClick={() => { setAddTermType('dk_term'); setShowAddTermModal(true); }} 
+                            className="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center cursor-pointer"
+                          >
+                            <PlusCircle size={11} className="mr-0.5" /> Thêm NK
+                          </button>
+                        )}
+                      </div>
                       <select 
                         className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-medium text-slate-700"
                         value={bchForm.committeeTerm}
                         onChange={(e) => setBchForm({...bchForm, committeeTerm: e.target.value})}
                       >
-                        <option value="2025-2027">Nhiệm kỳ 2025 - 2027 (Hiện tại)</option>
-                        <option value="2022-2025">Nhiệm kỳ 2022 - 2025</option>
-                        <option value="2020-2022">Nhiệm kỳ 2020 - 2022</option>
-                        <option value="2027-2029">Nhiệm kỳ 2027 - 2029</option>
+                        {doanKhoaTerms.map(t => (
+                          <option key={t} value={t}>Nhiệm kỳ {t}</option>
+                        ))}
                       </select>
                    </div>
 
                    <div>
-                      <label className="text-xs font-semibold text-slate-600 mb-1 block">Giai đoạn (Theo năm học)</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs font-semibold text-slate-600">Giai đoạn (Theo năm học)</label>
+                        {(isAdmin || currentUser?.role === 'admin') && (
+                          <button 
+                            type="button" 
+                            onClick={() => { setAddTermType('dk_period'); setShowAddTermModal(true); }} 
+                            className="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center cursor-pointer"
+                          >
+                            <PlusCircle size={11} className="mr-0.5" /> Thêm GĐ
+                          </button>
+                        )}
+                      </div>
                       <select 
                         className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-medium text-slate-700"
                         value={bchForm.committeePeriod}
                         onChange={(e) => setBchForm({...bchForm, committeePeriod: e.target.value})}
                       >
-                        <option value="2026-2027">Năm học 2026 - 2027 (Mới)</option>
-                        <option value="2025-2026">Năm học 2025 - 2026</option>
-                        <option value="2024-2025">Năm học 2024 - 2025</option>
-                        <option value="2023-2024">Năm học 2023 - 2024</option>
-                        <option value="2022-2023">Năm học 2022 - 2023</option>
+                        {doanKhoaPeriods.map(p => (
+                          <option key={p} value={p}>Năm học {p}</option>
+                        ))}
                       </select>
                    </div>
                  </div>
@@ -1612,17 +1772,26 @@ export default function AdminScreen() {
                    </div>
 
                    <div>
-                      <label className="text-xs font-semibold text-slate-600 mb-1 block">Nhiệm kỳ Chi đoàn (Theo năm học)</label>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-xs font-semibold text-slate-600">Nhiệm kỳ Chi đoàn (Theo năm học)</label>
+                        {(isAdmin || currentUser?.role === 'admin') && (
+                          <button 
+                            type="button" 
+                            onClick={() => { setAddTermType('cd_term'); setShowAddTermModal(true); }} 
+                            className="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center cursor-pointer"
+                          >
+                            <PlusCircle size={11} className="mr-0.5" /> Thêm NK
+                          </button>
+                        )}
+                      </div>
                       <select 
                         className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-medium text-slate-700"
                         value={bchForm.branchTerm}
                         onChange={(e) => setBchForm({...bchForm, branchTerm: e.target.value})}
                       >
-                        <option value="2026-2027">Năm học 2026 - 2027 (Mới)</option>
-                        <option value="2025-2026">Năm học 2025 - 2026</option>
-                        <option value="2024-2025">Năm học 2024 - 2025</option>
-                        <option value="2023-2024">Năm học 2023 - 2024</option>
-                        <option value="2022-2023">Năm học 2022 - 2023</option>
+                        {chiDoanTerms.map(t => (
+                          <option key={t} value={t}>Năm học {t}</option>
+                        ))}
                       </select>
                    </div>
                  </div>
@@ -1820,6 +1989,54 @@ export default function AdminScreen() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {showAddTermModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-xs shadow-xl border border-slate-100">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold text-sm text-slate-800">
+                Thêm {addTermType === 'dk_term' ? 'Nhiệm kỳ Đoàn khoa' : addTermType === 'dk_period' ? 'Giai đoạn Đoàn khoa' : 'Nhiệm kỳ Chi đoàn'} mới
+              </h3>
+              <button onClick={() => setShowAddTermModal(false)} className="text-slate-400 hover:text-slate-600 text-xs font-bold">✕</button>
+            </div>
+            
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Khoảng năm học (VD: 2027-2029)</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 font-medium"
+                  value={newTermInput}
+                  onChange={e => setNewTermInput(e.target.value)}
+                  placeholder="2027-2029"
+                />
+                <p className="text-[10px] text-slate-400 mt-1 italic">
+                  * Mốc tháng 10 của năm kết thúc sẽ tự động dọn dẹp khi hết hạn.
+                </p>
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddTermModal(false)}
+                  className="flex-1 py-2 rounded-xl font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs transition"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddNewTerm}
+                  className="flex-1 py-2 rounded-xl font-bold bg-blue-600 text-white hover:bg-blue-700 text-xs shadow-md transition"
+                >
+                  Xác nhận thêm
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
