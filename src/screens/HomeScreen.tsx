@@ -128,20 +128,13 @@ export default function HomeScreen() {
         const cleanName = (u.name || '').trim().toLowerCase();
         const cleanMssv = (u.mssv || u.username || '').trim().toLowerCase();
 
-        let key = cleanEmail || (cleanMssv ? `mssv_${cleanMssv}` : (cleanName ? `name_${cleanName}` : u.id));
-
-        // Ensure dinhtienanh235@gmail.com or "Đinh Tiến Anh" is mapped to personal Bí thư profile
-        const isBiThu = cleanEmail === 'dinhtienanh235@gmail.com' || cleanName === 'đinh tiến anh';
-
-        if (isBiThu) {
-          key = 'dinhtienanh_bithu';
-        }
+        const key = cleanEmail || (cleanMssv ? `mssv_${cleanMssv}` : (cleanName ? `name_${cleanName}` : u.id));
 
         if (!userMap.has(key)) {
           userMap.set(key, {
             ...u,
-            name: isBiThu ? 'Đinh Tiến Anh' : (u.name || ''),
-            committeeRole: u.committeeRole || (isBiThu ? 'Bí thư Đoàn khoa' : ''),
+            name: u.name || '',
+            committeeRole: u.committeeRole || '',
             branch: u.branch || 'Đoàn khoa ĐTVT',
             avatar: u.avatar || u.photoURL || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
           });
@@ -150,9 +143,9 @@ export default function HomeScreen() {
           userMap.set(key, {
             ...existing,
             ...u,
-            name: isBiThu ? 'Đinh Tiến Anh' : (u.name || existing.name),
+            name: u.name || existing.name,
             avatar: u.avatar || u.photoURL || existing.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
-            committeeRole: u.committeeRole || existing.committeeRole || (isBiThu ? 'Bí thư Đoàn khoa' : ''),
+            committeeRole: u.committeeRole || existing.committeeRole || '',
             committeeTerm: u.committeeTerm || existing.committeeTerm,
             branch: u.branch || existing.branch || 'Đoàn khoa ĐTVT',
           });
@@ -163,18 +156,15 @@ export default function HomeScreen() {
       if (currentUser) {
         const cEmail = (currentUser.email || '').toLowerCase();
         const cName = (currentUser.name || '').toLowerCase();
-        let cKey = cEmail || (cName ? `name_${cName}` : currentUser.uid);
-        if (cEmail === 'dinhtienanh235@gmail.com' || cName === 'đinh tiến anh') {
-          cKey = 'dinhtienanh_bithu';
-        }
+        const cKey = cEmail || (cName ? `name_${cName}` : currentUser.uid);
 
         if (userMap.has(cKey)) {
           const ex = userMap.get(cKey);
           userMap.set(cKey, {
             ...ex,
             avatar: currentUser.avatar || ex.avatar,
-            name: cKey === 'dinhtienanh_bithu' ? 'Đinh Tiến Anh' : (currentUser.name || ex.name),
-            committeeRole: ex.committeeRole || (cKey === 'dinhtienanh_bithu' ? 'Bí thư Đoàn khoa' : ''),
+            name: currentUser.name || ex.name,
+            committeeRole: currentUser.committeeRole || ex.committeeRole || '',
           });
         }
       }

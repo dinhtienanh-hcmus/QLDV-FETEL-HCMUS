@@ -1509,7 +1509,9 @@ export default function AdminScreen() {
                     <option value="">-- Không có chức vụ --</option>
                     <option value="Bí thư Đoàn khoa">Bí thư Đoàn khoa</option>
                     <option value="Phó Bí thư Đoàn khoa">Phó Bí thư Đoàn khoa</option>
+                    <option value="Ủy viên Ban Thường vụ Đoàn khoa">Ủy viên Ban Thường vụ Đoàn khoa</option>
                     <option value="Ủy viên BTV Đoàn khoa">Ủy viên BTV Đoàn khoa</option>
+                    <option value="Ủy viên Ban Thường vụ">Ủy viên Ban Thường vụ</option>
                     <option value="Ủy viên BCH Đoàn khoa">Ủy viên BCH Đoàn khoa</option>
                     <option value="Bí thư Chi đoàn">Bí thư Chi đoàn</option>
                     <option value="Phó Bí thư Chi đoàn">Phó Bí thư Chi đoàn</option>
