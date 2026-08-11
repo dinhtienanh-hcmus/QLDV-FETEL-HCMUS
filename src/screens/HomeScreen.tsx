@@ -205,24 +205,24 @@ export default function HomeScreen() {
           </div>
         ))}
 
-        {/* 3. Merged UV BCH */}
+        {/* 3. UV BCH Group */}
         {uvList.length > 0 && (
-          <div className="flex flex-col items-center shrink-0 min-w-[130px] max-w-[200px] bg-slate-50/80 p-2 rounded-2xl border border-slate-200/60">
-            <div className="flex -space-x-2.5 overflow-hidden my-1">
+          <div className="flex flex-col items-center shrink-0 bg-slate-50/80 p-2 rounded-2xl border border-slate-200/60">
+            <div className="flex items-start space-x-3">
               {uvList.map(m => (
-                <img 
-                  key={m.id || m.mssv || m.name} 
-                  src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
-                  alt={m.name} 
-                  className={`w-10 h-10 ${bgClass} rounded-full border-2 border-white object-cover shadow-xs`}
-                  title={`${m.name} (${m.committeeRole || 'UV BCH'})`}
-                />
+                <div key={m.id || m.mssv || m.name} className="flex flex-col items-center w-20 shrink-0">
+                  <img 
+                    src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                    alt={m.name} 
+                    className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
+                  />
+                  <span className="text-[10px] mt-1 font-bold text-slate-800 text-center line-clamp-1" title={m.name}>
+                    {m.name}
+                  </span>
+                </div>
               ))}
             </div>
-            <span className="text-[9px] font-bold text-slate-800 text-center line-clamp-2 px-1 leading-tight" title={uvList.map(u => u.name).join(', ')}>
-              {uvList.map(u => u.name).join(', ')}
-            </span>
-            <span className={`text-[8px] ${textClass} font-extrabold uppercase text-center mt-1`}>
+            <span className={`text-[8px] ${textClass} font-extrabold uppercase text-center mt-1.5 pt-1 border-t border-slate-200/60 w-full`}>
               ỦY VIÊN BAN CHẤP HÀNH
             </span>
           </div>
