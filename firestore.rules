@@ -1,0 +1,144 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitives
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // Role checks
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function getUserRole() {
+       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isBranchManager() {
+       return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'chidoan';
+    }
+
+    // --- Entity Validations ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'name', 'role', 'createdAt']) &&
+             data.email is string && data.email.size() >= 1 && data.email.size() <= 256 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 256 &&
+             data.role is string && data.role in ['admin', 'chidoan', 'doanvien'] &&
+             data.createdAt is number;
+    }
+
+    function isValidActivity(data) {
+      return data.keys().hasAll(['name', 'startTime', 'endTime', 'pointsParticipant', 'pointsOrganizer', 'targetAudience', 'semester', 'academicYear', 'status', 'creatorId', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 256 &&
+             data.startTime is number &&
+             data.endTime is number &&
+             data.pointsParticipant is number &&
+             data.pointsOrganizer is number &&
+             data.targetAudience is string && data.targetAudience.size() >= 1 && data.targetAudience.size() <= 128 &&
+             data.semester is number && data.semester >= 1 && data.semester <= 3 &&
+             data.academicYear is string && data.academicYear.size() >= 1 && data.academicYear.size() <= 64 &&
+             data.status is string && data.status in ['pending', 'approved', 'rejected'] &&
+             data.creatorId is string && data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.createdAt is number && data.updatedAt is number;
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll(['userId', 'status']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.status is string && data.status in ['registered', 'attended', 'organizer'];
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['title', 'message', 'targetAudience', 'createdAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 256 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 1024 &&
+             data.targetAudience is string && data.targetAudience.size() >= 1 && data.targetAudience.size() <= 128 &&
+             data.createdAt is number;
+    }
+
+    function isValidHandbookTopic(data) {
+      return data.keys().hasAll(['title', 'content', 'order']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 256 &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 65536 &&
+             data.order is number;
+    }
+
+    // --- Collections ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn(); // Allow all to read for basic profile finding
+      allow create: if (isOwner(userId) || isAdmin()) && isValidId(userId) && (
+        incoming().role == 'doanvien' ||
+        incoming().role == 'chidoan' ||
+        (incoming().role == 'admin' && incoming().email.lower() in ['dinhtienanh.hcmus@gmail.com', 'dkdtvt.hcmus@gmail.com'])
+      );
+      allow update: if isSignedIn() && isValidUser(incoming()) && (
+        isAdmin() ||
+        (isOwner(userId) && incoming().email.lower() in ['dinhtienanh.hcmus@gmail.com', 'dkdtvt.hcmus@gmail.com']) ||
+        (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'avatar', 'branch', 'mssv', 'updatedAt']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /bch_members/{memberId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    
+    match /branches/{branchId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn(); // All can read notifications intended for them (client filters for now)
+      allow create: if isSignedIn() && isAdmin() && isValidNotification(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    match /handbook_topics/{topicId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() && isValidId(topicId) && isValidHandbookTopic(incoming());
+      allow update: if isAdmin() && isValidHandbookTopic(incoming());
+      allow delete: if isAdmin();
+    }
+
+    match /activities/{activityId} {
+      allow read: if isSignedIn(); // All can read activities
+      allow create: if isSignedIn() && isValidId(activityId) && isValidActivity(incoming()) && (
+        isAdmin() ||
+        (isBranchManager() && incoming().creatorId == request.auth.uid)
+      );
+      allow update: if isSignedIn() && isValidActivity(incoming()) && (
+        isAdmin() ||
+        (isBranchManager() && existing().creatorId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'startTime', 'endTime', 'pointsParticipant', 'pointsOrganizer', 'targetAudience', 'semester', 'academicYear', 'planLink', 'evidenceLink', 'status', 'updatedAt']))
+      );
+      allow delete: if isAdmin() || (isBranchManager() && existing().creatorId == request.auth.uid);
+
+      match /registrations/{registrationId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && registrationId is string && registrationId.size() <= 128 && isValidRegistration(incoming()) && (
+          (isOwner(incoming().userId) && incoming().status in ['registered', 'attended']) ||
+          (isAdmin() && incoming().status in ['attended', 'organizer']) ||
+          (isBranchManager() && incoming().status in ['attended', 'organizer'])
+        );
+        allow update: if isSignedIn() && isValidRegistration(incoming()) && (
+          isAdmin() ||
+          isBranchManager() ||
+          (isOwner(existing().userId) && incoming().status in ['registered', 'attended'])
+        );
+        allow delete: if isAdmin() || isOwner(existing().userId) || isBranchManager();
+      }
+    }
+  }
+} // <EOF>

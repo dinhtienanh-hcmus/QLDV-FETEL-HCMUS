@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "User profile with role-based access",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "mssv": { "type": "string" },
+        "branch": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "chidoan", "doanvien"] },
+        "avatar": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    },
+    "bch_member": {
+      "title": "BCH Member",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "avatar": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name", "role", "avatar", "createdAt"]
+    },
+    "activity": {
+      "title": "Activity",
+      "description": "An organized event or campaign",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "startTime": { "type": "number" },
+        "endTime": { "type": "number" },
+        "pointsParticipant": { "type": "number" },
+        "pointsOrganizer": { "type": "number" },
+        "branch": { "type": "string" },
+        "targetAudience": { "type": "string" },
+        "semester": { "type": "number", "enum": [1, 2, 3] },
+        "academicYear": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "planLink": { "type": "string" },
+        "evidenceLink": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["name", "startTime", "endTime", "pointsParticipant", "pointsOrganizer", "targetAudience", "semester", "academicYear", "status", "creatorId", "createdAt", "updatedAt"]
+    },
+    "registration": {
+      "title": "Registration",
+      "description": "User's registration for an activity",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "activityId": { "type": "string" },
+        "status": { "type": "string", "enum": ["registered", "attended", "organizer"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "activityId", "status", "createdAt"]
+    },
+    "notification": {
+      "title": "Notification",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "targetAudience": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "message", "targetAudience", "createdAt"]
+    },
+    "handbook_topic": {
+      "title": "Handbook Topic",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["title", "content", "order"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/user" },
+      "description": "User profiles"
+    },
+    "/bch_members/{memberId}": {
+      "schema": { "$ref": "#/entities/bch_member" },
+      "description": "Executive committee members"
+    },
+    "/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/activity" },
+      "description": "Activities"
+    },
+    "/activities/{activityId}/registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/registration" },
+      "description": "Registrations and attendances for an activity"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/notification" },
+      "description": "System notifications"
+    },
+    "/handbook_topics/{topicId}": {
+      "schema": { "$ref": "#/entities/handbook_topic" },
+      "description": "Handbook topics"
+    }
+  }
+}
