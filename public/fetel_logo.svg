@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e88e5"/>
+      <stop offset="50%" stop-color="#0288d1"/>
+      <stop offset="100%" stop-color="#01579b"/>
+    </linearGradient>
+    <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0288d1"/>
+      <stop offset="100%" stop-color="#4fc3f7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="500" height="500" fill="#ffffff" rx="32"/>
+
+  <!-- Top Right Year Text -->
+  <g transform="rotate(-10 370 70)">
+    <text x="370" y="70" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="28" fill="#0d47a1" text-anchor="middle" letter-spacing="1">2006 - 2026</text>
+  </g>
+
+  <!-- Main '20' Stylized Graphic -->
+  <!-- '2' shape -->
+  <path d="M 80 350 L 210 210 C 240 170 230 110 180 90 C 130 70 80 110 80 160 C 80 175 60 175 60 160 C 60 80 130 30 200 60 C 270 90 280 170 230 230 L 140 350 Z" fill="url(#blueGrad)"/>
+  
+  <!-- Triangle base inside '2' -->
+  <polygon points="60,350 210,350 210,210" fill="url(#blueGrad)"/>
+
+  <!-- '0' shape -->
+  <path d="M 360 80 C 430 80 470 140 470 220 C 470 300 420 350 340 350 C 270 350 250 290 250 240 C 250 180 280 80 360 80 Z M 350 130 C 310 130 295 180 295 235 C 295 280 310 310 345 310 C 390 310 420 270 420 215 C 420 160 390 130 350 130 Z" fill="url(#blueGrad)"/>
+
+  <!-- Text: fetel@HCMUS -->
+  <text x="250" y="415" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif">
+    <tspan font-size="52" font-weight="700" fill="#546e7a">fetel@</tspan>
+    <tspan font-size="56" font-weight="900" fill="#0d47a1">HCMUS</tspan>
+  </text>
+
+  <!-- Bottom Badge: KHOA ĐIỆN TỬ - VIỄN THÔNG -->
+  <rect x="20" y="432" width="460" height="48" rx="8" fill="url(#badgeGrad)"/>
+  <text x="250" y="464" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="21" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">KHOA ĐIỆN TỬ - VIỄN THÔNG</text>
+</svg>

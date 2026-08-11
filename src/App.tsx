@@ -35,7 +35,7 @@ function AppContent() {
             <div className="hidden md:flex w-64 bg-slate-900 border-r border-slate-800 flex-col py-6 shrink-0 z-20">
               <div className="px-6 mb-8 flex items-center">
                 <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center p-1 shadow-lg mr-3">
-                   <img src="/fetel_logo.png" alt="FETEL Logo" className="w-full h-full object-contain" />
+                   <img src="/Logo20nam.png" onError={(e) => { e.currentTarget.src = '/Logo20nam.svg'; }} alt="FETEL Logo" className="w-full h-full object-contain" />
                 </div>
                 <div>
                   <h1 className="text-white font-bold text-lg leading-tight">FETEL@HCMUS</h1>

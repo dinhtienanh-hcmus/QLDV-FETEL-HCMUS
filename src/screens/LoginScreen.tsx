@@ -112,7 +112,7 @@ export default function LoginScreen() {
         <div className="mb-6 text-center text-white mx-auto">
           <div className="bg-white/95 backdrop-blur-sm inline-flex items-center justify-center gap-3.5 px-4 py-2.5 rounded-[999px] shadow-xl mb-4 shadow-blue-900/20 border border-white/20">
              <div className="h-10 w-auto flex items-center justify-center">
-                <img src="https://lh3.googleusercontent.com/d/1C0ixDWE5Sh1AsHpYt9PHKbxIcWAbAPUe" referrerPolicy="no-referrer" alt="Khoa Điển tử - Viễn thông" className="h-full w-auto object-contain drop-shadow-sm" />
+                <img src="/Logo20nam.png" onError={(e) => { e.currentTarget.src = '/Logo20nam.svg'; }} alt="Khoa Điện tử - Viễn thông" className="h-full w-auto object-contain drop-shadow-sm" />
              </div>
              <div className="h-10 w-10 flex items-center justify-center">
                 <img src="https://lh3.googleusercontent.com/d/1m-QuYuCQoo8CzPFis0fBdKM2TNM49Yyg" referrerPolicy="no-referrer" alt="Đoàn Thanh Niên" className="h-full w-full object-contain drop-shadow-sm" />
