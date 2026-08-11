@@ -65,6 +65,17 @@ export default function AdminScreen() {
   const isAdmin = currentUser?.role === 'admin';
   const isBranch = currentUser?.role === 'chidoan';
 
+  const isUserInMyBranch = (u: any) => {
+    if (isAdmin) return true;
+    if (isBranch) {
+      const myBranch = (currentUser?.branch || '').trim().toLowerCase();
+      if (!myBranch) return false;
+      const uBranch = (u.branch || '').trim().toLowerCase();
+      return uBranch === myBranch || uBranch.includes(myBranch) || myBranch.includes(uBranch);
+    }
+    return false;
+  };
+
   const [activeTab, setActiveTab] = useState<'activities' | 'users' | 'bch' | 'handbook' | 'branches'>('activities');
   const [usersList, setUsersList] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -646,9 +657,15 @@ export default function AdminScreen() {
     <div className="flex flex-col h-full bg-slate-50">
       <div className="bg-slate-900 text-white p-6 pt-10 shrink-0">
         <h2 className="text-lg font-bold">Quản lý Đoàn</h2>
-        <p className="text-[10px] opacity-70">{isAdmin ? 'Duyệt hoạt động, gửi thông báo, quản lý Chi đoàn và tài khoản' : 'Tạo hoạt động và báo cáo minh chứng'}</p>
+        <p className="text-[10px] opacity-70">
+          {isAdmin 
+            ? 'Duyệt hoạt động, gửi thông báo, quản lý Chi đoàn và tài khoản' 
+            : isBranch 
+              ? `Quản lý đoàn viên & Ban Chấp hành Chi đoàn ${currentUser?.branch || ''}` 
+              : 'Tạo hoạt động và báo cáo minh chứng'}
+        </p>
         
-        {isAdmin && (
+        {(isAdmin || isBranch) && (
           <div className="mt-4 flex gap-2 border-b border-slate-700/50 pb-[-1px] overflow-x-auto no-scrollbar">
             <button 
               onClick={() => setActiveTab('activities')}
@@ -656,30 +673,34 @@ export default function AdminScreen() {
             >
               Hoạt động
             </button>
-            <button 
-              onClick={() => setActiveTab('branches')}
-              className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'branches' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-            >
-              Chi Đoàn
-            </button>
+            {isAdmin && (
+              <button 
+                onClick={() => setActiveTab('branches')}
+                className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'branches' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+              >
+                Chi Đoàn
+              </button>
+            )}
             <button 
               onClick={() => setActiveTab('users')}
               className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'users' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
             >
-              Tài khoản
+              {isBranch ? 'Đoàn viên Chi đoàn' : 'Tài khoản'}
             </button>
             <button 
               onClick={() => setActiveTab('bch')}
               className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'bch' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
             >
-              Ban Chấp hành
+              {isBranch ? 'BCH Chi đoàn' : 'Ban Chấp hành'}
             </button>
-            <button 
-              onClick={() => setActiveTab('handbook')}
-              className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'handbook' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-            >
-              Sổ tay ĐV
-            </button>
+            {isAdmin && (
+              <button 
+                onClick={() => setActiveTab('handbook')}
+                className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'handbook' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+              >
+                Sổ tay ĐV
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1078,85 +1099,99 @@ export default function AdminScreen() {
           </div>
         )}
 
-        {activeTab === 'users' && isAdmin && (
+        {activeTab === 'users' && (isAdmin || isBranch) && (
           <>
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-                <Users size={16} className="mr-1.5 text-blue-600"/> Tạo tài khoản mới
-              </h3>
-              <form onSubmit={handleCreateAccount} className="space-y-3">
-                 <input 
-                   type="text" placeholder="MSSV / Tên đăng nhập" 
-                   className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
-                   value={newUsername} onChange={e => setNewUsername(e.target.value)} required 
-                 />
-                 <input 
-                   type="text" placeholder="Họ và tên / Tên hiển thị" 
-                   className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
-                   value={newName} onChange={e => setNewName(e.target.value)} required 
-                 />
-                 <select 
-                   className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
-                   value={newRole} onChange={e => setNewRole(e.target.value)}
-                 >
-                    <option value="chidoan">Bí thư / Quản lý Chi đoàn</option>
-                    <option value="doanvien">Đoàn viên</option>
-                    <option value="admin">Quản trị viên (Admin)</option>
-                 </select>
-                 <input 
-                   type="text" 
-                   list="branch-options"
-                   placeholder="Tên đơn vị (Chọn hoặc nhập tên Chi đoàn / Đoàn khoa...)" 
-                   className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
-                   value={newBranch} 
-                   onChange={e => setNewBranch(e.target.value)}
-                 />
-                 <datalist id="branch-options">
-                   <option value="Đoàn khoa ĐTVT" />
-                   {branches.map(b => (
-                     <option key={b.id} value={b.name} />
-                   ))}
-                 </datalist>
-                 <button 
-                   type="submit" disabled={creatingAccount}
-                   className="w-full bg-[#1d4ed8] text-white font-bold text-xs py-2.5 rounded-lg hover:bg-blue-800 disabled:opacity-70"
-                 >
-                   {creatingAccount ? 'ĐANG TẠO...' : 'TẠO TÀI KHOẢN (MẬT KHẨU: 123123)'}
-                 </button>
-              </form>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-                <Upload size={16} className="mr-1.5 text-blue-600"/> Import Hàng Loạt (CSV)
-              </h3>
-              <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và dùng đúng định dạng để tạo nhiều tài khoản cùng lúc. Mật khẩu mặc định: <b>123123</b>.</p>
-              
-              <div className="flex gap-2">
-                 <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1">
-                   <FileSpreadsheet size={14} className="mr-1.5" /> Tải mẫu CSV
-                 </button>
-                 <label className="text-[10px] text-blue-600 font-bold flex items-center border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg cursor-pointer justify-center flex-1">
-                   <Upload size={14} className="mr-1.5" /> Upload CSV
-                   <input type="file" accept=".csv" className="hidden" onChange={handleBulkImport} disabled={creatingAccount} />
-                 </label>
+            {isBranch && (
+              <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-xl text-blue-900 text-xs flex items-center justify-between mb-3">
+                <div>
+                  <span className="font-bold">Chi đoàn:</span> <span className="bg-blue-600 text-white font-bold px-2 py-0.5 rounded text-[11px] ml-1">{currentUser?.branch || 'Chưa cập nhật'}</span>
+                  <p className="text-[11px] text-blue-700 mt-0.5">Tài khoản Chi đoàn có quyền xem, quản lý và cập nhật chức vụ Ban Chấp hành cho đoàn viên thuộc Chi đoàn mình.</p>
+                </div>
               </div>
-              {creatingAccount && <div className="text-xs text-center mt-2 text-blue-600 font-medium">Đang tiến hành tạo tài khoản, xin vui lòng đợi...</div>}
-            </div>
+            )}
+
+            {isAdmin && (
+              <>
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                  <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
+                    <Users size={16} className="mr-1.5 text-blue-600"/> Tạo tài khoản mới
+                  </h3>
+                  <form onSubmit={handleCreateAccount} className="space-y-3">
+                     <input 
+                       type="text" placeholder="MSSV / Tên đăng nhập" 
+                       className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
+                       value={newUsername} onChange={e => setNewUsername(e.target.value)} required 
+                     />
+                     <input 
+                       type="text" placeholder="Họ và tên / Tên hiển thị" 
+                       className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
+                       value={newName} onChange={e => setNewName(e.target.value)} required 
+                     />
+                     <select 
+                       className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
+                       value={newRole} onChange={e => setNewRole(e.target.value)}
+                     >
+                        <option value="chidoan">Bí thư / Quản lý Chi đoàn</option>
+                        <option value="doanvien">Đoàn viên</option>
+                        <option value="admin">Quản trị viên (Admin)</option>
+                     </select>
+                     <input 
+                       type="text" 
+                       list="branch-options"
+                       placeholder="Tên đơn vị (Chọn hoặc nhập tên Chi đoàn / Đoàn khoa...)" 
+                       className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
+                       value={newBranch} 
+                       onChange={e => setNewBranch(e.target.value)}
+                     />
+                     <datalist id="branch-options">
+                       <option value="Đoàn khoa ĐTVT" />
+                       {branches.map(b => (
+                         <option key={b.id} value={b.name} />
+                       ))}
+                     </datalist>
+                     <button 
+                       type="submit" disabled={creatingAccount}
+                       className="w-full bg-[#1d4ed8] text-white font-bold text-xs py-2.5 rounded-lg hover:bg-blue-800 disabled:opacity-70"
+                     >
+                       {creatingAccount ? 'ĐANG TẠO...' : 'TẠO TÀI KHOẢN (MẬT KHẨU: 123123)'}
+                     </button>
+                  </form>
+                </div>
+
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                  <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
+                    <Upload size={16} className="mr-1.5 text-blue-600"/> Import Hàng Loạt (CSV)
+                  </h3>
+                  <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và dùng đúng định dạng để tạo nhiều tài khoản cùng lúc. Mật khẩu mặc định: <b>123123</b>.</p>
+                  
+                  <div className="flex gap-2">
+                     <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1">
+                       <FileSpreadsheet size={14} className="mr-1.5" /> Tải mẫu CSV
+                     </button>
+                     <label className="text-[10px] text-blue-600 font-bold flex items-center border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg cursor-pointer justify-center flex-1">
+                       <Upload size={14} className="mr-1.5" /> Upload CSV
+                       <input type="file" accept=".csv" className="hidden" onChange={handleBulkImport} disabled={creatingAccount} />
+                     </label>
+                  </div>
+                  {creatingAccount && <div className="text-xs text-center mt-2 text-blue-600 font-medium">Đang tiến hành tạo tài khoản, xin vui lòng đợi...</div>}
+                </div>
+              </>
+            )}
 
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center">
-                  <List size={16} className="mr-1.5 text-blue-600"/> Danh sách tài khoản hệ thống ({usersList.length})
+                  <List size={16} className="mr-1.5 text-blue-600"/> 
+                  {isBranch ? `Danh sách Đoàn viên Chi đoàn ${currentUser?.branch || ''}` : 'Danh sách tài khoản hệ thống'} ({usersList.filter(isUserInMyBranch).length})
                 </h3>
-                {selectedBranchFilter && (
+                {isAdmin && selectedBranchFilter && (
                   <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full w-fit">
                     Lớp {selectedBranchFilter}: {usersList.filter(u => (u.branch || '').toLowerCase() === selectedBranchFilter.toLowerCase()).length} tài khoản
                   </span>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+              <div className={`grid grid-cols-1 ${isAdmin ? 'sm:grid-cols-2' : ''} gap-2 mb-3`}>
                 <input 
                   type="text" 
                   placeholder="Tìm kiếm theo Họ tên, Email, MSSV..." 
@@ -1164,16 +1199,18 @@ export default function AdminScreen() {
                   value={userSearch}
                   onChange={e => setUserSearch(e.target.value)}
                 />
-                <select
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 cursor-pointer font-medium text-slate-700"
-                  value={selectedBranchFilter}
-                  onChange={e => setSelectedBranchFilter(e.target.value)}
-                >
-                  <option value="">-- Tất cả Chi đoàn / Lớp --</option>
-                  {Array.from(new Set([...branches.map(b => b.name), ...DEFAULT_BRANCHES])).map(b => (
-                    <option key={b} value={b}>Chi đoàn {b}</option>
-                  ))}
-                </select>
+                {isAdmin && (
+                  <select
+                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 cursor-pointer font-medium text-slate-700"
+                    value={selectedBranchFilter}
+                    onChange={e => setSelectedBranchFilter(e.target.value)}
+                  >
+                    <option value="">-- Tất cả Chi đoàn / Lớp --</option>
+                    {Array.from(new Set([...branches.map(b => b.name), ...DEFAULT_BRANCHES])).map(b => (
+                      <option key={b} value={b}>Chi đoàn {b}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               {loadingUsers ? (
@@ -1182,7 +1219,8 @@ export default function AdminScreen() {
                 <div className="space-y-2 max-h-[550px] overflow-y-auto pr-1 no-scrollbar">
                    {usersList
                     .filter((u: any) => {
-                      if (selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
+                      if (!isUserInMyBranch(u)) return false;
+                      if (isAdmin && selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
                         return false;
                       }
                       const q = userSearch.toLowerCase().trim();
@@ -1203,6 +1241,9 @@ export default function AdminScreen() {
                                <span className="font-semibold text-blue-700">{u.role === 'admin' ? 'QTV Khoa' : u.role === 'chidoan' ? 'BCH Chi đoàn' : 'Đoàn viên'}</span>
                                <span>•</span>
                                <span className="bg-slate-200/70 text-slate-700 px-1.5 py-0.5 rounded font-medium">{u.branch || 'Chưa phân lớp'}</span>
+                               {u.committeeRole && (
+                                 <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[9px]">{u.committeeRole}</span>
+                               )}
                                {u.mssv && (
                                  <>
                                    <span>•</span>
@@ -1218,6 +1259,9 @@ export default function AdminScreen() {
                             </div>
                          </div>
                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button onClick={() => handleOpenBchEdit(u)} className="p-1.5 text-amber-700 bg-amber-50 hover:bg-amber-100 rounded text-[10px] font-bold flex items-center shrink-0" title="Gán/Cập nhật chức vụ BCH">
+                               <Users size={12} className="mr-1" /> Gán BCH
+                            </button>
                             <button onClick={() => handleEditUser(u)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
                                <Edit2 size={12} className="mr-1" /> Sửa
                             </button>
@@ -1228,7 +1272,8 @@ export default function AdminScreen() {
                       </div>
                    ))}
                    {usersList.filter((u: any) => {
-                      if (selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
+                      if (!isUserInMyBranch(u)) return false;
+                      if (isAdmin && selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
                         return false;
                       }
                       const q = userSearch.toLowerCase().trim();
@@ -1241,7 +1286,7 @@ export default function AdminScreen() {
                         (u.branch || '').toLowerCase().includes(q)
                       );
                     }).length === 0 && (
-                      <p className="text-xs text-center text-slate-400 py-6 italic">Không tìm thấy tài khoản phù hợp theo tìm kiếm/lớp đã chọn.</p>
+                      <p className="text-xs text-center text-slate-400 py-6 italic">Không tìm thấy đoàn viên phù hợp.</p>
                    )}
                 </div>
               )}
@@ -1249,12 +1294,17 @@ export default function AdminScreen() {
           </>
         )}
 
-        {activeTab === 'bch' && isAdmin && (
+        {activeTab === 'bch' && (isAdmin || isBranch) && (
           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-            <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-              <Users size={16} className="mr-1.5 text-blue-600"/> Quản lý Ban Chấp hành
+            <h3 className="text-sm font-bold text-slate-800 mb-1 flex items-center">
+              <Users size={16} className="mr-1.5 text-blue-600"/> 
+              {isBranch ? `Quản lý Ban Chấp hành Chi đoàn ${currentUser?.branch || ''}` : 'Quản lý Ban Chấp hành'}
             </h3>
-            <p className="text-xs text-slate-500 mb-3">Nhấn vào "Cập nhật chức vụ" để gán chức danh cho bất kỳ tài khoản nào. Những tài khoản có chức danh sẽ hiện ở trang chủ.</p>
+            <p className="text-xs text-slate-500 mb-3">
+              {isBranch 
+                ? 'Nhấn "Cập nhật" hoặc "Gán BCH" để gán chức danh Bí thư Chi đoàn, Phó Bí thư Chi đoàn hoặc Ủy viên BCH Chi đoàn cho đoàn viên.' 
+                : 'Nhấn vào "Cập nhật chức vụ" để gán chức danh cho bất kỳ tài khoản nào. Những tài khoản có chức danh sẽ hiện ở trang chủ.'}
+            </p>
             {loadingUsers ? (
               <p className="text-xs text-center text-slate-500">Đang tải...</p>
             ) : (
@@ -1267,8 +1317,9 @@ export default function AdminScreen() {
                    onChange={e => setSearchBch(e.target.value)}
                  />
                  <div className="space-y-2">
-                    <h4 className="font-bold text-slate-700">Đang là thành viên BCH:</h4>
+                    <h4 className="font-bold text-slate-700">Đang là thành viên BCH {isBranch ? `Chi đoàn ${currentUser?.branch || ''}` : ''}:</h4>
                     {usersList.filter(u => {
+                       if (!isUserInMyBranch(u)) return false;
                        if (!u.committeeRole) return false;
                        const q = searchBch.toLowerCase().trim();
                        if (!q) return true;
@@ -1282,6 +1333,7 @@ export default function AdminScreen() {
                        <p className="text-[10px] text-slate-400 italic">Chưa có thành viên BCH nào hoặc không khớp kết quả tìm kiếm.</p>
                     ) : (
                        usersList.filter(u => {
+                          if (!isUserInMyBranch(u)) return false;
                           if (!u.committeeRole) return false;
                           const q = searchBch.toLowerCase().trim();
                           if (!q) return true;
@@ -1298,7 +1350,7 @@ export default function AdminScreen() {
                                 <div>
                                    <div className="font-bold text-slate-800">{u.name} <span className="text-[10px] font-normal text-slate-500">({u.email || u.username})</span></div>
                                    <div className="text-[10px] text-slate-500 mt-0.5">
-                                      {u.committeeRole} • NK {u.committeeTerm}
+                                      {u.committeeRole} • NK {u.committeeTerm || '2025-2027'}
                                    </div>
                                 </div>
                              </div>
@@ -1316,9 +1368,10 @@ export default function AdminScreen() {
                  </div>
 
                  <div className="space-y-2 mt-4 pt-4 border-t border-slate-100">
-                    <h4 className="font-bold text-slate-700">Tài khoản khác (chọn để thêm vào BCH):</h4>
+                    <h4 className="font-bold text-slate-700">Đoàn viên khác (chọn để gán vào BCH {isBranch ? `Chi đoàn ${currentUser?.branch || ''}` : ''}):</h4>
                     <div className="max-h-60 overflow-y-auto space-y-2 pr-1 no-scrollbar">
                        {usersList.filter(u => {
+                          if (!isUserInMyBranch(u)) return false;
                           if (u.committeeRole) return false;
                           const q = searchBch.toLowerCase().trim();
                           if (!q) return true;
@@ -1335,8 +1388,8 @@ export default function AdminScreen() {
                                 <div className="text-[9px] text-slate-500 mt-0.5">{u.branch || 'Chưa cập nhật đơn vị'}</div>
                              </div>
                              <div className="flex items-center gap-1">
-                                <button onClick={() => handleOpenBchEdit(u)} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[9px] font-bold">
-                                   Thêm vào BCH
+                                <button onClick={() => handleOpenBchEdit(u)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[9px] font-bold">
+                                   + Thêm vào BCH
                                 </button>
                                 <button onClick={() => handleDeleteUser(u)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa tài khoản">
                                    <Trash2 size={12} />

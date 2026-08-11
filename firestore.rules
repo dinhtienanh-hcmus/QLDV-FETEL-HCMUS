@@ -81,8 +81,8 @@ service cloud.firestore {
       allow get: if isSignedIn();
       allow list: if isSignedIn(); // Allow all to read for basic profile finding
       allow create: if isSignedIn();
-      allow update: if isSignedIn() && (isAdmin() || isOwner(userId));
-      allow delete: if isAdmin() || isOwner(userId);
+      allow update: if isSignedIn() && (isAdmin() || isOwner(userId) || isBranchManager());
+      allow delete: if isAdmin() || isOwner(userId) || isBranchManager();
     }
 
     match /bch_members/{memberId} {
