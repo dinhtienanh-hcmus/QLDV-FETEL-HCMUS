@@ -117,6 +117,16 @@ export default function AdminScreen() {
     avatar: ''
   });
 
+  const [editingUserInfo, setEditingUserInfo] = useState<any>(null);
+  const [userEditForm, setUserEditForm] = useState({
+    name: '',
+    mssv: '',
+    branch: '',
+    email: '',
+    username: '',
+    role: 'doanvien'
+  });
+
   useEffect(() => {
     fetchActivities();
     fetchUsers();
@@ -582,21 +592,44 @@ export default function AdminScreen() {
     });
   };
 
-  const handleEditUser = async (u: any) => {
-    const newName = window.prompt("Nhập họ tên mới:", u.name || "");
-    if (newName === null) return;
-    const newBranch = window.prompt("Nhập tên chi đoàn/đơn vị mới:", u.branch || "");
-    if (newBranch === null) return;
-    
+  const handleEditUser = (u: any) => {
+    setEditingUserInfo(u);
+    setUserEditForm({
+      name: u.name || '',
+      mssv: u.mssv || u.username || '',
+      branch: u.branch || currentUser?.branch || '',
+      email: u.email || '',
+      username: u.username || u.mssv || '',
+      role: u.role || 'doanvien'
+    });
+  };
+
+  const handleSaveUserInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUserInfo) return;
+
     try {
-      await updateDoc(doc(db, 'users', u.id), {
-        name: newName.trim(),
-        branch: newBranch.trim()
-      });
-      fetchUsers();
-    } catch(e) {
-      console.error(e);
-      alert("Lỗi cập nhật người dùng");
+      const updates: any = {
+        name: userEditForm.name.trim(),
+        mssv: userEditForm.mssv.trim(),
+        branch: userEditForm.branch.trim(),
+        email: userEditForm.email.trim(),
+        updatedAt: Date.now()
+      };
+      if (userEditForm.username.trim()) {
+        updates.username = userEditForm.username.trim();
+      }
+      if (isAdmin && userEditForm.role) {
+        updates.role = userEditForm.role;
+      }
+
+      await updateDoc(doc(db, 'users', editingUserInfo.id), updates);
+      setUsersList(prev => prev.map(u => u.id === editingUserInfo.id ? { ...u, ...updates } : u));
+      setEditingUserInfo(null);
+      alert("Cập nhật thông tin đoàn viên thành công!");
+    } catch (err) {
+      console.error(err);
+      alert("Có lỗi khi lưu thông tin đoàn viên.");
     }
   };
 
@@ -1585,6 +1618,103 @@ export default function AdminScreen() {
                 Xóa ngay
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {editingUserInfo && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl border border-slate-100">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-bold text-base text-slate-800">
+                Cập nhật thông tin Đoàn viên
+              </h3>
+              <button onClick={() => setEditingUserInfo(null)} className="text-slate-400 hover:text-slate-600 text-sm font-bold">✕</button>
+            </div>
+            
+            <form onSubmit={handleSaveUserInfo} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Họ và tên <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 font-medium"
+                  value={userEditForm.name}
+                  onChange={e => setUserEditForm({ ...userEditForm, name: e.target.value })}
+                  placeholder="VD: Nguyễn Văn A"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Mã số sinh viên (MSSV)</label>
+                <input
+                  type="text"
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 font-medium"
+                  value={userEditForm.mssv}
+                  onChange={e => setUserEditForm({ ...userEditForm, mssv: e.target.value })}
+                  placeholder="VD: 23120001"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Chi đoàn / Lớp</label>
+                <input
+                  type="text"
+                  list="branch-options-edit"
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 font-medium"
+                  value={userEditForm.branch}
+                  onChange={e => setUserEditForm({ ...userEditForm, branch: e.target.value })}
+                  placeholder="VD: 23DTV1"
+                />
+                <datalist id="branch-options-edit">
+                  {branches.map(b => (
+                    <option key={b.id} value={b.name} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600 mb-1 block">Email liên hệ / Gmail</label>
+                <input
+                  type="email"
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 font-medium"
+                  value={userEditForm.email}
+                  onChange={e => setUserEditForm({ ...userEditForm, email: e.target.value })}
+                  placeholder="VD: nguyenvana@gmail.com"
+                />
+              </div>
+
+              {isAdmin && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 mb-1 block">Vai trò hệ thống</label>
+                  <select
+                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 font-medium text-slate-700"
+                    value={userEditForm.role}
+                    onChange={e => setUserEditForm({ ...userEditForm, role: e.target.value })}
+                  >
+                    <option value="doanvien">Đoàn viên</option>
+                    <option value="chidoan">BCH Chi đoàn</option>
+                    <option value="admin">Quản trị viên (QTV Khoa)</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="flex space-x-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingUserInfo(null)}
+                  className="flex-1 py-2.5 rounded-xl font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs transition cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl font-bold bg-blue-600 text-white hover:bg-blue-700 text-xs shadow-md transition cursor-pointer"
+                >
+                  Lưu thay đổi
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
