@@ -44,7 +44,6 @@ export default function OnboardingModal() {
     currentUser.role === 'admin' || 
     currentUser.role === 'chidoan' || 
     userEmail === 'dkdtvt.hcmus@gmail.com' || 
-    userEmail === 'dinhtienanh.hcmus@gmail.com' ||
     userEmail.startsWith('chidoan') ||
     userEmail.startsWith('cd') ||
     userEmail.includes('admin');

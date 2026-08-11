@@ -23,7 +23,7 @@ export default function LoginScreen() {
     if (trimmed.includes('@')) return trimmed;
     
     if (trimmed === 'admin') {
-      return 'dinhtienanh.hcmus@gmail.com';
+      return 'dkdtvt.hcmus@gmail.com';
     }
 
     // Chi đoàn usernames (e.g. 25dtv1.fetel or 25dtv1)
