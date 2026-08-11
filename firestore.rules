@@ -77,6 +77,11 @@ service cloud.firestore {
 
     // --- Collections ---
 
+    match /system/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
     match /users/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn(); // Allow all to read for basic profile finding

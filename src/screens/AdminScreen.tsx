@@ -181,12 +181,16 @@ export default function AdminScreen() {
       setChiDoanTerms(activeCdTerms);
 
       // Sync active cleaned list to Firestore
-      await setDoc(termsDocRef, {
-        doanKhoaTerms: activeDkTerms,
-        doanKhoaPeriods: activeDkPeriods,
-        chiDoanTerms: activeCdTerms,
-        updatedAt: Date.now()
-      }, { merge: true });
+      try {
+        await setDoc(termsDocRef, {
+          doanKhoaTerms: activeDkTerms,
+          doanKhoaPeriods: activeDkPeriods,
+          chiDoanTerms: activeCdTerms,
+          updatedAt: Date.now()
+        }, { merge: true });
+      } catch (writeErr) {
+        console.warn("Không thể lưu cập nhật nhiệm kỳ lên Firestore:", writeErr);
+      }
     } catch (e) {
       console.error("Lỗi tải/dọn dẹp danh sách nhiệm kỳ:", e);
     }
