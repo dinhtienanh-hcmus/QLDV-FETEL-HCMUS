@@ -68,6 +68,7 @@ export default function AdminScreen() {
   const [activeTab, setActiveTab] = useState<'activities' | 'users' | 'bch' | 'handbook' | 'branches'>('activities');
   const [usersList, setUsersList] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
   const [searchBch, setSearchBch] = useState('');
 
   const [branches, setBranches] = useState<any[]>([]);
@@ -584,6 +585,19 @@ export default function AdminScreen() {
     } catch(e) {
       console.error(e);
       alert("Lỗi cập nhật người dùng");
+    }
+  };
+
+  const handleDeleteUser = async (u: any) => {
+    const nameStr = u.name || u.email || u.username || u.id;
+    if (!window.confirm(`Bạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản "${nameStr}" (ID: ${u.id})?`)) return;
+    try {
+      await deleteDoc(doc(db, 'users', u.id));
+      setUsersList(prev => prev.filter(item => item.id !== u.id));
+      alert(`Đã xóa tài khoản "${nameStr}" thành công.`);
+    } catch (e) {
+      console.error(e);
+      alert("Lỗi khi xóa tài khoản.");
     }
   };
 
@@ -1130,26 +1144,67 @@ export default function AdminScreen() {
             </div>
 
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-                <List size={16} className="mr-1.5 text-blue-600"/> Danh sách tài khoản hệ thống
-              </h3>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center">
+                  <List size={16} className="mr-1.5 text-blue-600"/> Danh sách tài khoản hệ thống ({usersList.length})
+                </h3>
+              </div>
+
+              <input 
+                type="text" 
+                placeholder="Tìm kiếm theo Họ tên, Email, MSSV, Chi đoàn..." 
+                className="w-full text-xs p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none mb-3"
+                value={userSearch}
+                onChange={e => setUserSearch(e.target.value)}
+              />
+
               {loadingUsers ? (
                 <p className="text-xs text-center text-slate-500">Đang tải...</p>
               ) : (
-                <div className="space-y-2">
-                   {usersList.map((u: any) => (
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1 no-scrollbar">
+                   {usersList
+                    .filter((u: any) => {
+                      const q = userSearch.toLowerCase().trim();
+                      if (!q) return true;
+                      return (
+                        (u.name || '').toLowerCase().includes(q) ||
+                        (u.email || '').toLowerCase().includes(q) ||
+                        (u.username || '').toLowerCase().includes(q) ||
+                        (u.mssv || '').toLowerCase().includes(q) ||
+                        (u.branch || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((u: any) => (
                       <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg">
                          <div>
-                            <div className="text-xs font-bold text-slate-800">{u.name || 'Chưa cập nhật tên'} <span className="opacity-70 font-normal">({u.username})</span></div>
+                            <div className="text-xs font-bold text-slate-800">{u.name || 'Chưa cập nhật tên'} <span className="opacity-70 font-normal">({u.username || u.email || u.id})</span></div>
                             <div className="text-[10px] text-slate-500 mt-1">
-                               {u.role === 'admin' ? 'QTV' : u.role === 'chidoan' ? 'BCH' : 'ĐV'} • {u.branch || 'Đoàn trường'}
+                               {u.role === 'admin' ? 'QTV' : u.role === 'chidoan' ? 'BCH' : 'ĐV'} • {u.branch || 'Đoàn trường'} {u.email ? `• ${u.email}` : ''}
                             </div>
                          </div>
-                         <button onClick={() => handleEditUser(u)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
-                            <Edit2 size={12} className="mr-1" /> Sửa
-                         </button>
+                         <div className="flex items-center gap-1.5">
+                            <button onClick={() => handleEditUser(u)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                               <Edit2 size={12} className="mr-1" /> Sửa
+                            </button>
+                            <button onClick={() => handleDeleteUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                               <Trash2 size={12} className="mr-1" /> Xóa
+                            </button>
+                         </div>
                       </div>
                    ))}
+                   {usersList.filter((u: any) => {
+                      const q = userSearch.toLowerCase().trim();
+                      if (!q) return true;
+                      return (
+                        (u.name || '').toLowerCase().includes(q) ||
+                        (u.email || '').toLowerCase().includes(q) ||
+                        (u.username || '').toLowerCase().includes(q) ||
+                        (u.mssv || '').toLowerCase().includes(q) ||
+                        (u.branch || '').toLowerCase().includes(q)
+                      );
+                    }).length === 0 && (
+                      <p className="text-xs text-center text-slate-400 py-4 italic">Không tìm thấy tài khoản phù hợp.</p>
+                   )}
                 </div>
               )}
             </div>
@@ -1168,30 +1223,55 @@ export default function AdminScreen() {
               <div className="space-y-4 text-xs">
                  <input 
                    type="text" 
-                   placeholder="Tìm kiếm theo Tên hoặc MSSV..." 
+                   placeholder="Tìm kiếm theo Tên, Email hoặc MSSV..." 
                    className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none mb-2"
                    value={searchBch}
                    onChange={e => setSearchBch(e.target.value)}
                  />
                  <div className="space-y-2">
                     <h4 className="font-bold text-slate-700">Đang là thành viên BCH:</h4>
-                    {usersList.filter(u => u.committeeRole && (u.name?.toLowerCase().includes(searchBch.toLowerCase()) || u.username?.toLowerCase().includes(searchBch.toLowerCase()))).length === 0 ? (
+                    {usersList.filter(u => {
+                       if (!u.committeeRole) return false;
+                       const q = searchBch.toLowerCase().trim();
+                       if (!q) return true;
+                       return (
+                         (u.name || '').toLowerCase().includes(q) ||
+                         (u.email || '').toLowerCase().includes(q) ||
+                         (u.username || '').toLowerCase().includes(q) ||
+                         (u.mssv || '').toLowerCase().includes(q)
+                       );
+                    }).length === 0 ? (
                        <p className="text-[10px] text-slate-400 italic">Chưa có thành viên BCH nào hoặc không khớp kết quả tìm kiếm.</p>
                     ) : (
-                       usersList.filter(u => u.committeeRole && (u.name?.toLowerCase().includes(searchBch.toLowerCase()) || u.username?.toLowerCase().includes(searchBch.toLowerCase()))).map((u: any) => (
+                       usersList.filter(u => {
+                          if (!u.committeeRole) return false;
+                          const q = searchBch.toLowerCase().trim();
+                          if (!q) return true;
+                          return (
+                            (u.name || '').toLowerCase().includes(q) ||
+                            (u.email || '').toLowerCase().includes(q) ||
+                            (u.username || '').toLowerCase().includes(q) ||
+                            (u.mssv || '').toLowerCase().includes(q)
+                          );
+                       }).map((u: any) => (
                           <div key={u.id} className="flex justify-between items-center p-3 bg-blue-50 border border-blue-100 rounded-lg">
                              <div className="flex items-center space-x-3">
                                 <img src={u.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} alt="avatar" className="w-8 h-8 rounded-full border border-slate-200 object-cover" />
                                 <div>
-                                   <div className="font-bold text-slate-800">{u.name}</div>
+                                   <div className="font-bold text-slate-800">{u.name} <span className="text-[10px] font-normal text-slate-500">({u.email || u.username})</span></div>
                                    <div className="text-[10px] text-slate-500 mt-0.5">
                                       {u.committeeRole} • NK {u.committeeTerm}
                                    </div>
                                 </div>
                              </div>
-                             <button onClick={() => handleOpenBchEdit(u)} className="p-1.5 text-blue-600 bg-white hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
-                                <Edit2 size={12} className="mr-1" /> Cập nhật
-                             </button>
+                             <div className="flex items-center gap-1.5">
+                                <button onClick={() => handleOpenBchEdit(u)} className="p-1.5 text-blue-600 bg-white hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                                   <Edit2 size={12} className="mr-1" /> Cập nhật
+                                </button>
+                                <button onClick={() => handleDeleteUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                                   <Trash2 size={12} className="mr-1" /> Xóa
+                                </button>
+                             </div>
                           </div>
                        ))
                     )}
@@ -1200,15 +1280,30 @@ export default function AdminScreen() {
                  <div className="space-y-2 mt-4 pt-4 border-t border-slate-100">
                     <h4 className="font-bold text-slate-700">Tài khoản khác (chọn để thêm vào BCH):</h4>
                     <div className="max-h-60 overflow-y-auto space-y-2 pr-1 no-scrollbar">
-                       {usersList.filter(u => !u.committeeRole && (u.name?.toLowerCase().includes(searchBch.toLowerCase()) || u.username?.toLowerCase().includes(searchBch.toLowerCase()))).map((u: any) => (
+                       {usersList.filter(u => {
+                          if (u.committeeRole) return false;
+                          const q = searchBch.toLowerCase().trim();
+                          if (!q) return true;
+                          return (
+                            (u.name || '').toLowerCase().includes(q) ||
+                            (u.email || '').toLowerCase().includes(q) ||
+                            (u.username || '').toLowerCase().includes(q) ||
+                            (u.mssv || '').toLowerCase().includes(q)
+                          );
+                       }).map((u: any) => (
                           <div key={u.id} className="flex justify-between items-center p-2 bg-slate-50 border border-slate-100 rounded-lg">
                              <div>
-                                <div className="font-bold text-slate-800 text-[11px]">{u.name} <span className="font-normal opacity-70">({u.username})</span></div>
+                                <div className="font-bold text-slate-800 text-[11px]">{u.name} <span className="font-normal opacity-70">({u.email || u.username})</span></div>
                                 <div className="text-[9px] text-slate-500 mt-0.5">{u.branch || 'Chưa cập nhật đơn vị'}</div>
                              </div>
-                             <button onClick={() => handleOpenBchEdit(u)} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[9px] font-bold">
-                                Thêm vào BCH
-                             </button>
+                             <div className="flex items-center gap-1">
+                                <button onClick={() => handleOpenBchEdit(u)} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[9px] font-bold">
+                                   Thêm vào BCH
+                                </button>
+                                <button onClick={() => handleDeleteUser(u)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa tài khoản">
+                                   <Trash2 size={12} />
+                                </button>
+                             </div>
                           </div>
                        ))}
                     </div>
