@@ -173,18 +173,18 @@ export default function HomeScreen() {
       <div className="flex items-stretch space-x-3 overflow-x-auto no-scrollbar pb-2 pt-1">
         {/* 1. Bí thư */}
         {biThuList.map(m => (
-          <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between w-28 shrink-0 bg-slate-50/80 p-2.5 rounded-2xl border border-slate-200/60">
+          <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between min-w-[110px] px-3 shrink-0 bg-slate-50/80 py-2.5 rounded-2xl border border-slate-200/60">
             <div className="flex flex-col items-center w-full">
               <img 
                 src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
                 alt={m.name} 
                 className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
               />
-              <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center line-clamp-2 leading-snug px-0.5" title={m.name}>
+              <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center whitespace-nowrap px-0.5" title={m.name}>
                 {m.name}
               </span>
             </div>
-            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight`}>
+            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight whitespace-nowrap`}>
               BÍ THƯ
             </span>
           </div>
@@ -192,18 +192,18 @@ export default function HomeScreen() {
 
         {/* 2. Phó Bí thư */}
         {phoBiThuList.map(m => (
-          <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between w-28 shrink-0 bg-slate-50/80 p-2.5 rounded-2xl border border-slate-200/60">
+          <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between min-w-[110px] px-3 shrink-0 bg-slate-50/80 py-2.5 rounded-2xl border border-slate-200/60">
             <div className="flex flex-col items-center w-full">
               <img 
                 src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
                 alt={m.name} 
                 className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
               />
-              <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center line-clamp-2 leading-snug px-0.5" title={m.name}>
+              <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center whitespace-nowrap px-0.5" title={m.name}>
                 {m.name}
               </span>
             </div>
-            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight`}>
+            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight whitespace-nowrap`}>
               PHÓ BÍ THƯ
             </span>
           </div>
@@ -211,22 +211,22 @@ export default function HomeScreen() {
 
         {/* 3. UV BCH Group */}
         {uvList.length > 0 && (
-          <div className="flex flex-col items-center justify-between shrink-0 bg-slate-50/80 p-2.5 rounded-2xl border border-slate-200/60">
-            <div className="flex items-start space-x-2">
+          <div className="flex flex-col items-center justify-between shrink-0 bg-slate-50/80 py-2.5 px-1 rounded-2xl border border-slate-200/60">
+            <div className="flex items-start space-x-1">
               {uvList.map(m => (
-                <div key={m.id || m.mssv || m.name} className="flex flex-col items-center w-28 shrink-0">
+                <div key={m.id || m.mssv || m.name} className="flex flex-col items-center min-w-[105px] px-2 shrink-0">
                   <img 
                     src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
                     alt={m.name} 
                     className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
                   />
-                  <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center line-clamp-2 leading-snug px-0.5" title={m.name}>
+                  <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center whitespace-nowrap px-0.5" title={m.name}>
                     {m.name}
                   </span>
                 </div>
               ))}
             </div>
-            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight`}>
+            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight whitespace-nowrap px-2`}>
               ỦY VIÊN BAN CHẤP HÀNH
             </span>
           </div>
