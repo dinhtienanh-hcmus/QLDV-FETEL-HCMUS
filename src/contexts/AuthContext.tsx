@@ -50,9 +50,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (userDocSnap.exists()) {
             const data = userDocSnap.data();
             const role = isDefaultAdmin ? 'admin' : (data.role || 'doanvien');
-            const defaultName = isDefaultAdmin ? (data.name && data.name !== 'Admin ĐTVT' ? data.name : 'Đinh Tiến Anh') : (data.name || firebaseUser.displayName || 'Đoàn viên');
-            const defaultCommitteeRole = isDefaultAdmin ? 'Bí thư Đoàn khoa' : (data.committeeRole || '');
-            const defaultBranch = data.branch || (isDefaultAdmin ? 'Đoàn khoa ĐTVT' : '');
+            const isBiThuAccount = userEmailLower === 'dinhtienanh235@gmail.com' || data.name === 'Đinh Tiến Anh';
+            
+            const defaultName = isDefaultAdmin 
+              ? (data.name && data.name !== 'Admin ĐTVT' && data.name !== 'Đinh Tiến Anh' ? data.name : 'BCH Đoàn khoa ĐTVT')
+              : (data.name || firebaseUser.displayName || 'Đoàn viên');
+            const defaultCommitteeRole = isBiThuAccount ? 'Bí thư Đoàn khoa' : (data.committeeRole || '');
+            const defaultBranch = data.branch || 'Đoàn khoa ĐTVT';
 
             appUser = {
               ...firebaseUser,
@@ -63,14 +67,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               avatar: data.avatar || firebaseUser.photoURL || undefined,
             };
 
-            // If it's a default admin or committeeRole is missing, sync fields
-            if (isDefaultAdmin && (data.role !== 'admin' || !data.committeeRole || data.name === 'Admin ĐTVT' || data.name === 'BCH Đoàn khoa ĐTVT')) {
+            // Sync database profile if needed
+            if (isDefaultAdmin && (data.role !== 'admin' || data.name === 'Đinh Tiến Anh')) {
               await setDoc(userDocRef, {
                 email: firebaseUser.email || userEmailLower,
-                name: defaultName,
+                name: 'BCH Đoàn khoa ĐTVT',
                 role: 'admin',
                 branch: defaultBranch,
-                committeeRole: defaultCommitteeRole,
+                updatedAt: Date.now()
+              }, { merge: true });
+            } else if (isBiThuAccount && !data.committeeRole) {
+              await setDoc(userDocRef, {
+                committeeRole: 'Bí thư Đoàn khoa',
+                name: data.name || 'Đinh Tiến Anh',
+                branch: defaultBranch,
                 updatedAt: Date.now()
               }, { merge: true });
             }
@@ -96,9 +106,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             }
 
-            const defaultName = matchedProfile?.name || firebaseUser.displayName || (isDefaultAdmin ? 'Đinh Tiến Anh' : userEmailLower.split('@')[0] || 'Đoàn viên');
-            const defaultCommitteeRole = matchedProfile?.committeeRole || (isDefaultAdmin ? 'Bí thư Đoàn khoa' : '');
-            const defaultBranch = matchedProfile?.branch || (isDefaultAdmin ? 'Đoàn khoa ĐTVT' : '');
+            const isBiThuAccount = userEmailLower === 'dinhtienanh235@gmail.com';
+            const defaultName = isBiThuAccount 
+              ? 'Đinh Tiến Anh' 
+              : (isDefaultAdmin 
+                ? 'BCH Đoàn khoa ĐTVT' 
+                : (matchedProfile?.name || firebaseUser.displayName || userEmailLower.split('@')[0] || 'Đoàn viên'));
+            const defaultCommitteeRole = isBiThuAccount 
+              ? 'Bí thư Đoàn khoa' 
+              : (matchedProfile?.committeeRole || '');
+            const defaultBranch = matchedProfile?.branch || 'Đoàn khoa ĐTVT';
 
             const newUserData = {
               email: firebaseUser.email || '',

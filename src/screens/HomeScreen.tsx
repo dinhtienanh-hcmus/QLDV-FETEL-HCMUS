@@ -130,32 +130,31 @@ export default function HomeScreen() {
 
         let key = cleanEmail || (cleanMssv ? `mssv_${cleanMssv}` : (cleanName ? `name_${cleanName}` : u.id));
 
-        // Special normalization for Đinh Tiến Anh / Admin account
-        if (cleanEmail === 'dinhtienanh.hcmus@gmail.com' || cleanName.includes('đinh tiến anh')) {
-          key = 'dinhtienanh_admin';
-        }
+        // Ensure dinhtienanh235@gmail.com or "Đinh Tiến Anh" is mapped to personal Bí thư profile
+        const isBiThu = cleanEmail === 'dinhtienanh235@gmail.com' || cleanName === 'đinh tiến anh';
 
-        const isTa = (key === 'dinhtienanh_admin');
+        if (isBiThu) {
+          key = 'dinhtienanh_bithu';
+        }
 
         if (!userMap.has(key)) {
           userMap.set(key, {
             ...u,
-            name: (isTa && (!u.name || u.name === 'Admin ĐTVT')) ? 'Đinh Tiến Anh' : (u.name || ''),
-            committeeRole: u.committeeRole || (isTa ? 'Bí thư Đoàn khoa' : ''),
-            branch: u.branch || (isTa ? 'Đoàn khoa ĐTVT' : ''),
-            avatar: u.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
+            name: isBiThu ? 'Đinh Tiến Anh' : (u.name || ''),
+            committeeRole: u.committeeRole || (isBiThu ? 'Bí thư Đoàn khoa' : ''),
+            branch: u.branch || 'Đoàn khoa ĐTVT',
+            avatar: u.avatar || u.photoURL || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
           });
         } else {
           const existing = userMap.get(key);
           userMap.set(key, {
             ...existing,
             ...u,
-            name: (isTa && (u.name === 'Admin ĐTVT' || !u.name)) ? existing.name : (u.name || existing.name),
-            avatar: u.avatar || existing.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : '') || (existing.id === currentUser?.uid ? currentUser?.avatar : ''),
-            committeeRole: u.committeeRole || existing.committeeRole || (isTa ? 'Bí thư Đoàn khoa' : ''),
+            name: isBiThu ? 'Đinh Tiến Anh' : (u.name || existing.name),
+            avatar: u.avatar || u.photoURL || existing.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
+            committeeRole: u.committeeRole || existing.committeeRole || (isBiThu ? 'Bí thư Đoàn khoa' : ''),
             committeeTerm: u.committeeTerm || existing.committeeTerm,
-            branch: u.branch || existing.branch || (isTa ? 'Đoàn khoa ĐTVT' : ''),
-            role: (u.role === 'admin' || existing.role === 'admin') ? 'admin' : (u.role || existing.role),
+            branch: u.branch || existing.branch || 'Đoàn khoa ĐTVT',
           });
         }
       }
@@ -165,8 +164,8 @@ export default function HomeScreen() {
         const cEmail = (currentUser.email || '').toLowerCase();
         const cName = (currentUser.name || '').toLowerCase();
         let cKey = cEmail || (cName ? `name_${cName}` : currentUser.uid);
-        if (cEmail === 'dinhtienanh.hcmus@gmail.com' || cName.includes('đinh tiến anh')) {
-          cKey = 'dinhtienanh_admin';
+        if (cEmail === 'dinhtienanh235@gmail.com' || cName === 'đinh tiến anh') {
+          cKey = 'dinhtienanh_bithu';
         }
 
         if (userMap.has(cKey)) {
@@ -174,8 +173,8 @@ export default function HomeScreen() {
           userMap.set(cKey, {
             ...ex,
             avatar: currentUser.avatar || ex.avatar,
-            name: (cKey === 'dinhtienanh_admin' && currentUser.name === 'Admin ĐTVT') ? 'Đinh Tiến Anh' : (currentUser.name || ex.name),
-            committeeRole: ex.committeeRole || (cKey === 'dinhtienanh_admin' ? 'Bí thư Đoàn khoa' : ''),
+            name: cKey === 'dinhtienanh_bithu' ? 'Đinh Tiến Anh' : (currentUser.name || ex.name),
+            committeeRole: ex.committeeRole || (cKey === 'dinhtienanh_bithu' ? 'Bí thư Đoàn khoa' : ''),
           });
         }
       }
