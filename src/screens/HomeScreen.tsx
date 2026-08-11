@@ -119,25 +119,72 @@ export default function HomeScreen() {
       const q = query(collection(db, 'users'));
       const snapshot = await getDocs(q);
       const allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
-      const bch = allUsers.filter(u => u.committeeRole && u.committeeRole.trim() !== '');
       
-      // Deduplicate by branch + mssv or name
-      const map = new Map<string, any>();
-      for (const u of bch) {
+      // Step 1: Merge profiles by identity across all users (email > mssv > name)
+      const userMap = new Map<string, any>();
+
+      for (const u of allUsers) {
+        const cleanEmail = (u.email || '').trim().toLowerCase();
         const cleanName = (u.name || '').trim().toLowerCase();
         const cleanMssv = (u.mssv || u.username || '').trim().toLowerCase();
-        const branchKey = (u.branch || '').trim().toLowerCase();
-        const key = `${branchKey}_${cleanMssv || cleanName}`;
-        if (!key || key === '_') continue;
 
-        if (!map.has(key)) {
-          map.set(key, u);
+        let key = cleanEmail || (cleanMssv ? `mssv_${cleanMssv}` : (cleanName ? `name_${cleanName}` : u.id));
+
+        // Special normalization for Đinh Tiến Anh / Admin account
+        if (cleanEmail === 'dinhtienanh.hcmus@gmail.com' || cleanName.includes('đinh tiến anh')) {
+          key = 'dinhtienanh_admin';
+        }
+
+        const isTa = (key === 'dinhtienanh_admin');
+
+        if (!userMap.has(key)) {
+          userMap.set(key, {
+            ...u,
+            name: (isTa && (!u.name || u.name === 'Admin ĐTVT')) ? 'Đinh Tiến Anh' : (u.name || ''),
+            committeeRole: u.committeeRole || (isTa ? 'Bí thư Đoàn khoa' : ''),
+            branch: u.branch || (isTa ? 'Đoàn khoa ĐTVT' : ''),
+            avatar: u.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
+          });
         } else {
-          const existing = map.get(key);
-          map.set(key, { ...existing, ...u, avatar: u.avatar || existing.avatar });
+          const existing = userMap.get(key);
+          userMap.set(key, {
+            ...existing,
+            ...u,
+            name: (isTa && (u.name === 'Admin ĐTVT' || !u.name)) ? existing.name : (u.name || existing.name),
+            avatar: u.avatar || existing.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : '') || (existing.id === currentUser?.uid ? currentUser?.avatar : ''),
+            committeeRole: u.committeeRole || existing.committeeRole || (isTa ? 'Bí thư Đoàn khoa' : ''),
+            committeeTerm: u.committeeTerm || existing.committeeTerm,
+            branch: u.branch || existing.branch || (isTa ? 'Đoàn khoa ĐTVT' : ''),
+            role: (u.role === 'admin' || existing.role === 'admin') ? 'admin' : (u.role || existing.role),
+          });
         }
       }
-      setBchMembers(Array.from(map.values()));
+
+      // Step 2: Inject current logged-in user details if matched
+      if (currentUser) {
+        const cEmail = (currentUser.email || '').toLowerCase();
+        const cName = (currentUser.name || '').toLowerCase();
+        let cKey = cEmail || (cName ? `name_${cName}` : currentUser.uid);
+        if (cEmail === 'dinhtienanh.hcmus@gmail.com' || cName.includes('đinh tiến anh')) {
+          cKey = 'dinhtienanh_admin';
+        }
+
+        if (userMap.has(cKey)) {
+          const ex = userMap.get(cKey);
+          userMap.set(cKey, {
+            ...ex,
+            avatar: currentUser.avatar || ex.avatar,
+            name: (cKey === 'dinhtienanh_admin' && currentUser.name === 'Admin ĐTVT') ? 'Đinh Tiến Anh' : (currentUser.name || ex.name),
+            committeeRole: ex.committeeRole || (cKey === 'dinhtienanh_admin' ? 'Bí thư Đoàn khoa' : ''),
+          });
+        }
+      }
+
+      // Step 3: Filter for valid BCH members
+      const mergedList = Array.from(userMap.values());
+      const bch = mergedList.filter(u => u.committeeRole && u.committeeRole.trim() !== '');
+
+      setBchMembers(bch);
     } catch (e) {
       console.error(e);
     }

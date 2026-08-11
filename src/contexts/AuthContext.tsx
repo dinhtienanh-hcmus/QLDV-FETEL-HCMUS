@@ -50,24 +50,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (userDocSnap.exists()) {
             const data = userDocSnap.data();
             const role = isDefaultAdmin ? 'admin' : (data.role || 'doanvien');
-            
+            const defaultName = isDefaultAdmin ? (data.name && data.name !== 'Admin ĐTVT' ? data.name : 'Đinh Tiến Anh') : (data.name || firebaseUser.displayName || 'Đoàn viên');
+            const defaultCommitteeRole = isDefaultAdmin ? 'Bí thư Đoàn khoa' : (data.committeeRole || '');
+            const defaultBranch = data.branch || (isDefaultAdmin ? 'Đoàn khoa ĐTVT' : '');
+
             appUser = {
               ...firebaseUser,
               role,
-              branch: data.branch || (isDefaultAdmin ? 'Đoàn khoa ĐTVT' : undefined),
+              branch: defaultBranch,
               mssv: data.mssv,
-              name: data.name || firebaseUser.displayName || 'Admin ĐTVT',
-              avatar: data.avatar,
+              name: defaultName,
+              avatar: data.avatar || firebaseUser.photoURL || undefined,
             };
 
-            // If it's a default admin but Firestore didn't have admin role set, sync it
-            if (isDefaultAdmin && data.role !== 'admin') {
+            // If it's a default admin or committeeRole is missing, sync fields
+            if (isDefaultAdmin && (data.role !== 'admin' || !data.committeeRole || data.name === 'Admin ĐTVT' || data.name === 'BCH Đoàn khoa ĐTVT')) {
               await setDoc(userDocRef, {
                 email: firebaseUser.email || userEmailLower,
-                name: data.name || firebaseUser.displayName || 'BCH Đoàn khoa ĐTVT',
+                name: defaultName,
                 role: 'admin',
-                branch: data.branch || 'Đoàn khoa ĐTVT',
-                createdAt: data.createdAt || Date.now()
+                branch: defaultBranch,
+                committeeRole: defaultCommitteeRole,
+                updatedAt: Date.now()
               }, { merge: true });
             }
           } else {
@@ -92,14 +96,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             }
 
+            const defaultName = matchedProfile?.name || firebaseUser.displayName || (isDefaultAdmin ? 'Đinh Tiến Anh' : userEmailLower.split('@')[0] || 'Đoàn viên');
+            const defaultCommitteeRole = matchedProfile?.committeeRole || (isDefaultAdmin ? 'Bí thư Đoàn khoa' : '');
+            const defaultBranch = matchedProfile?.branch || (isDefaultAdmin ? 'Đoàn khoa ĐTVT' : '');
+
             const newUserData = {
               email: firebaseUser.email || '',
-              name: matchedProfile?.name || firebaseUser.displayName || (isDefaultAdmin ? 'BCH Đoàn khoa ĐTVT' : userEmailLower.split('@')[0] || 'Đoàn viên'),
+              name: defaultName,
               mssv: matchedProfile?.mssv || mssvFromEmail || '',
               role: isDefaultAdmin ? 'admin' : 'doanvien',
-              branch: matchedProfile?.branch || (isDefaultAdmin ? 'Đoàn khoa ĐTVT' : ''),
-              committeeRole: matchedProfile?.committeeRole || '',
+              branch: defaultBranch,
+              committeeRole: defaultCommitteeRole,
               committeeTerm: matchedProfile?.committeeTerm || '',
+              avatar: firebaseUser.photoURL || '',
               createdAt: Date.now()
             };
 
@@ -111,6 +120,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 name: newUserData.name,
                 branch: newUserData.branch,
                 mssv: newUserData.mssv,
+                avatar: firebaseUser.photoURL || undefined,
               };
             } catch (err) {
               console.error("Error creating user profile:", err);
