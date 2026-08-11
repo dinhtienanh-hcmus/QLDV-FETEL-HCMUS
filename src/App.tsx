@@ -34,8 +34,8 @@ function AppContent() {
             {/* Desktop Sidebar Navigation */}
             <div className="hidden md:flex w-64 bg-slate-900 border-r border-slate-800 flex-col py-6 shrink-0 z-20">
               <div className="px-6 mb-8 flex items-center">
-                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center p-1 shadow-lg mr-3">
-                   <img src="/Logo20nam.png" onError={(e) => { e.currentTarget.src = '/Logo20nam.svg'; }} alt="FETEL Logo" className="w-full h-full object-contain" />
+                <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center p-1.5 shadow-lg mr-3">
+                   <img src="https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png" alt="Logo" className="w-full h-full object-contain" />
                 </div>
                 <div>
                   <h1 className="text-white font-bold text-lg leading-tight">FETEL@HCMUS</h1>
