@@ -10,6 +10,7 @@ interface AppUser extends FirebaseUser {
   name?: string;
   avatar?: string;
   committeeRole?: string;
+  branchRole?: string;
   committeeTerm?: string;
 }
 
@@ -57,6 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ? (data.name && data.name !== 'Admin ĐTVT' ? data.name : 'BCH Đoàn khoa ĐTVT')
               : (data.name || firebaseUser.displayName || 'Đoàn viên');
             const defaultCommitteeRole = data.committeeRole || '';
+            const defaultBranchRole = data.branchRole || '';
             const defaultBranch = data.branch || 'Đoàn khoa ĐTVT';
 
             appUser = {
@@ -66,6 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               mssv: data.mssv,
               name: defaultName,
               committeeRole: defaultCommitteeRole,
+              branchRole: defaultBranchRole,
               committeeTerm: data.committeeTerm || '',
               avatar: data.avatar || firebaseUser.photoURL || undefined,
             };

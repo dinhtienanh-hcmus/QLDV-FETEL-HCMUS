@@ -90,7 +90,7 @@ export default function HomeScreen() {
   const bchDoanKhoa = bchMembers.filter(m => {
     if (!m.committeeRole || m.committeeRole.trim() === '') return false;
     const r = m.committeeRole.toLowerCase();
-    // Exclude Chi doan specific roles unless it also mentions Đoàn khoa or BTV/Thường vụ
+    // Exclude pure Chi doan specific roles unless it also mentions Đoàn khoa or BTV/Thường vụ
     if (r.includes('chi đoàn') && !r.includes('đoàn khoa') && !r.includes('btv') && !r.includes('thường vụ')) {
       return false;
     }
@@ -98,11 +98,19 @@ export default function HomeScreen() {
   });
 
   const bchChiDoan = !isDoanKhoaAccount && currentUser?.branch
-    ? bchMembers.filter(m => 
-        m.branch === currentUser?.branch && 
-        !bchDoanKhoa.some(dk => dk.id === m.id) &&
-        m.committeeRole && m.committeeRole.trim() !== ''
-      )
+    ? bchMembers.filter(m => {
+        const isUserBranch = (m.branch || '').toLowerCase() === (currentUser.branch || '').toLowerCase();
+        if (!isUserBranch) return false;
+
+        const branchRole = (m.branchRole || '').trim();
+        const committeeRole = (m.committeeRole || '').trim().toLowerCase();
+
+        return branchRole !== '' || committeeRole.includes('chi đoàn') || m.role === 'chidoan';
+      }).map(m => ({
+        ...m,
+        // Override committeeRole for the Chi đoàn section view so it shows their Chi đoàn title
+        committeeRole: m.branchRole || (m.committeeRole && m.committeeRole.toLowerCase().includes('chi đoàn') ? m.committeeRole : 'Bí thư Chi đoàn')
+      }))
     : [];
 
   // Use current user's email if available, fallback
@@ -135,6 +143,7 @@ export default function HomeScreen() {
             ...u,
             name: u.name || '',
             committeeRole: u.committeeRole || '',
+            branchRole: u.branchRole || '',
             branch: u.branch || 'Đoàn khoa ĐTVT',
             avatar: u.avatar || u.photoURL || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
           });
@@ -146,6 +155,7 @@ export default function HomeScreen() {
             name: u.name || existing.name,
             avatar: u.avatar || u.photoURL || existing.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
             committeeRole: u.committeeRole || existing.committeeRole || '',
+            branchRole: u.branchRole || existing.branchRole || '',
             committeeTerm: u.committeeTerm || existing.committeeTerm,
             branch: u.branch || existing.branch || 'Đoàn khoa ĐTVT',
           });
@@ -165,13 +175,17 @@ export default function HomeScreen() {
             avatar: currentUser.avatar || ex.avatar,
             name: currentUser.name || ex.name,
             committeeRole: currentUser.committeeRole || ex.committeeRole || '',
+            branchRole: currentUser.branchRole || ex.branchRole || '',
           });
         }
       }
 
-      // Step 3: Filter for valid BCH members
+      // Step 3: Filter for valid BCH members (either Đoàn khoa or Chi đoàn)
       const mergedList = Array.from(userMap.values());
-      const bch = mergedList.filter(u => u.committeeRole && u.committeeRole.trim() !== '');
+      const bch = mergedList.filter(u => 
+        (u.committeeRole && u.committeeRole.trim() !== '') || 
+        (u.branchRole && u.branchRole.trim() !== '')
+      );
 
       setBchMembers(bch);
     } catch (e) {

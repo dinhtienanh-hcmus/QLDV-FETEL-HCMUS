@@ -112,6 +112,7 @@ export default function AdminScreen() {
   const [editingBchUser, setEditingBchUser] = useState<any>(null);
   const [bchForm, setBchForm] = useState({
     committeeRole: '',
+    branchRole: '',
     committeePeriod: '2026-2027',
     committeeTerm: '2025-2027',
     avatar: ''
@@ -650,6 +651,7 @@ export default function AdminScreen() {
     setEditingBchUser(u);
     setBchForm({
       committeeRole: u.committeeRole || '',
+      branchRole: u.branchRole || (u.committeeRole && u.committeeRole.toLowerCase().includes('chi đoàn') ? u.committeeRole : ''),
       committeePeriod: u.committeePeriod || '2026-2027',
       committeeTerm: u.committeeTerm || '2025-2027',
       avatar: u.avatar || ''
@@ -661,12 +663,16 @@ export default function AdminScreen() {
     if (!editingBchUser) return;
     
     let updates: any = {};
-    if (bchForm.committeeRole.trim() === '') {
-       updates.committeeRole = null;
+    const commRole = bchForm.committeeRole.trim();
+    const brRole = bchForm.branchRole.trim();
+
+    updates.committeeRole = commRole || null;
+    updates.branchRole = brRole || null;
+
+    if (!commRole && !brRole) {
        updates.committeePeriod = null;
        updates.committeeTerm = null;
     } else {
-       updates.committeeRole = bchForm.committeeRole.trim();
        updates.committeePeriod = bchForm.committeePeriod.trim();
        updates.committeeTerm = bchForm.committeeTerm.trim();
        if (bchForm.avatar.trim() !== '') {
@@ -680,9 +686,10 @@ export default function AdminScreen() {
       await updateDoc(doc(db, 'users', editingBchUser.id), updates);
       setEditingBchUser(null);
       fetchUsers();
+      alert("Cập nhật chức vụ thành công!");
     } catch(e) {
       console.error(e);
-      alert("Lỗi cập nhật người dùng");
+      alert("Lỗi cập nhật chức vụ");
     }
   };
 
@@ -1496,32 +1503,50 @@ export default function AdminScreen() {
 
       {editingBchUser && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
-            <h3 className="font-bold text-lg mb-4 text-slate-800">Cập nhật chức vụ</h3>
-            <form onSubmit={handleSaveBchUser} className="space-y-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-800">Cập nhật chức vụ BCH</h3>
+                <p className="text-xs text-slate-500">{editingBchUser.name} - {editingBchUser.branch}</p>
+              </div>
+              <button type="button" onClick={() => setEditingBchUser(null)} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveBchUser} className="space-y-3.5">
                <div>
-                  <label className="text-xs font-semibold text-slate-600 mb-1 block">Chức vụ Ban Chấp hành</label>
+                  <label className="text-xs font-semibold text-slate-600 mb-1 block">Chức vụ cấp Đoàn khoa / LCH</label>
                   <select 
-                    className="w-full text-sm p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-medium text-slate-700"
                     value={bchForm.committeeRole}
                     onChange={(e) => setBchForm({...bchForm, committeeRole: e.target.value})}
                   >
-                    <option value="">-- Không có chức vụ --</option>
+                    <option value="">-- Không tham gia BCH Đoàn khoa --</option>
                     <option value="Bí thư Đoàn khoa">Bí thư Đoàn khoa</option>
                     <option value="Phó Bí thư Đoàn khoa">Phó Bí thư Đoàn khoa</option>
                     <option value="Ủy viên Ban Thường vụ Đoàn khoa">Ủy viên Ban Thường vụ Đoàn khoa</option>
-                    <option value="Ủy viên BTV Đoàn khoa">Ủy viên BTV Đoàn khoa</option>
                     <option value="Ủy viên Ban Thường vụ">Ủy viên Ban Thường vụ</option>
                     <option value="Ủy viên BCH Đoàn khoa">Ủy viên BCH Đoàn khoa</option>
-                    <option value="Bí thư Chi đoàn">Bí thư Chi đoàn</option>
-                    <option value="Phó Bí thư Chi đoàn">Phó Bí thư Chi đoàn</option>
-                    <option value="Ủy viên BCH Chi đoàn">Ủy viên BCH Chi đoàn</option>
                     <option value="Liên Chi hội trưởng">Liên Chi hội trưởng</option>
                     <option value="Liên Chi hội phó">Liên Chi hội phó</option>
                     <option value="Ủy viên BCH Liên Chi hội">Ủy viên BCH Liên Chi hội</option>
                   </select>
                </div>
-               {bchForm.committeeRole && (
+
+               <div>
+                  <label className="text-xs font-semibold text-slate-600 mb-1 block">Chức vụ cấp Chi đoàn</label>
+                  <select 
+                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-medium text-slate-700"
+                    value={bchForm.branchRole}
+                    onChange={(e) => setBchForm({...bchForm, branchRole: e.target.value})}
+                  >
+                    <option value="">-- Không tham gia BCH Chi đoàn --</option>
+                    <option value="Bí thư Chi đoàn">Bí thư Chi đoàn</option>
+                    <option value="Phó Bí thư Chi đoàn">Phó Bí thư Chi đoàn</option>
+                    <option value="Ủy viên BCH Chi đoàn">Ủy viên BCH Chi đoàn</option>
+                  </select>
+               </div>
+
+               {(bchForm.committeeRole || bchForm.branchRole) && (
                  <>
                    <div>
                      <label className="text-xs font-semibold text-slate-600 mb-1 block">Nhiệm kỳ theo năm học</label>
