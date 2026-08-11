@@ -87,21 +87,21 @@ export default function HomeScreen() {
   const isDoanKhoaAccount = currentUser?.role === 'admin';
   
   // Filter BCH Đoàn khoa and BCH Chi đoàn
-  const bchDoanKhoa = bchMembers.filter(m => 
-    m.committeeRole && (
-      m.committeeRole.toLowerCase().includes('đoàn khoa') ||
-      m.committeeRole.toLowerCase().includes('btv') ||
-      m.committeeRole.toLowerCase().includes('liên chi hội') ||
-      m.branch === 'Đoàn khoa ĐTVT' ||
-      m.role === 'admin'
-    )
-  );
+  const bchDoanKhoa = bchMembers.filter(m => {
+    if (!m.committeeRole || m.committeeRole.trim() === '') return false;
+    const r = m.committeeRole.toLowerCase();
+    // Exclude Chi doan specific roles unless it also mentions Đoàn khoa or BTV/Thường vụ
+    if (r.includes('chi đoàn') && !r.includes('đoàn khoa') && !r.includes('btv') && !r.includes('thường vụ')) {
+      return false;
+    }
+    return true;
+  });
 
   const bchChiDoan = !isDoanKhoaAccount && currentUser?.branch
     ? bchMembers.filter(m => 
         m.branch === currentUser?.branch && 
         !bchDoanKhoa.some(dk => dk.id === m.id) &&
-        (m.committeeRole || m.role === 'chidoan')
+        m.committeeRole && m.committeeRole.trim() !== ''
       )
     : [];
 
@@ -183,19 +183,22 @@ export default function HomeScreen() {
     const r = roleStr.toLowerCase();
     if (r.includes('bí thư') && !r.includes('phó bí thư') && !r.includes('phó bí')) return 1;
     if (r.includes('phó bí thư') || r.includes('phó bí')) return 2;
-    if (r.includes('ủy viên') || r.includes('uv')) return 3;
-    return 4;
+    if (r.includes('thường vụ') || r.includes('btv')) return 3;
+    if (r.includes('chấp hành') || r.includes('bch') || r.includes('ủy viên') || r.includes('uv')) return 4;
+    return 5;
   };
 
   const renderBchSection = (members: any[], colorType: 'blue' | 'emerald') => {
     const validMembers = members.filter(m => m.committeeRole && m.committeeRole.trim() !== '');
 
-    // Sort by rank: Bí thư (1) -> Phó Bí thư (2) -> UV BCH (3)
+    // Sort by rank: Bí thư (1) -> Phó Bí thư (2) -> BTV (3) -> UV BCH (4)
     const sorted = [...validMembers].sort((a, b) => getRoleRank(a.committeeRole) - getRoleRank(b.committeeRole));
 
     const biThuList = sorted.filter(m => getRoleRank(m.committeeRole) === 1);
     const phoBiThuList = sorted.filter(m => getRoleRank(m.committeeRole) === 2);
-    const uvList = sorted.filter(m => getRoleRank(m.committeeRole) >= 3);
+    const btvList = sorted.filter(m => getRoleRank(m.committeeRole) === 3);
+    const uvBchList = sorted.filter(m => getRoleRank(m.committeeRole) === 4);
+    const otherList = sorted.filter(m => getRoleRank(m.committeeRole) === 5);
 
     const borderClass = colorType === 'blue' ? 'border-[#1d4ed8]' : 'border-emerald-600';
     const bgClass = colorType === 'blue' ? 'bg-blue-100' : 'bg-emerald-100';
@@ -245,11 +248,34 @@ export default function HomeScreen() {
           </div>
         ))}
 
-        {/* 3. UV BCH Group */}
-        {uvList.length > 0 && (
+        {/* 3. Ủy viên Ban Thường vụ Group */}
+        {btvList.length > 0 && (
           <div className="flex flex-col items-center justify-between shrink-0 bg-slate-50/80 py-2.5 px-1 rounded-2xl border border-slate-200/60">
             <div className="flex items-start space-x-1">
-              {uvList.map(m => (
+              {btvList.map(m => (
+                <div key={m.id || m.mssv || m.name} className="flex flex-col items-center min-w-[105px] px-2 shrink-0">
+                  <img 
+                    src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                    alt={m.name} 
+                    className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
+                  />
+                  <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center whitespace-nowrap px-0.5" title={m.name}>
+                    {m.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight whitespace-nowrap px-2`}>
+              ỦY VIÊN BAN THƯỜNG VỤ
+            </span>
+          </div>
+        )}
+
+        {/* 4. UV BCH Group */}
+        {uvBchList.length > 0 && (
+          <div className="flex flex-col items-center justify-between shrink-0 bg-slate-50/80 py-2.5 px-1 rounded-2xl border border-slate-200/60">
+            <div className="flex items-start space-x-1">
+              {uvBchList.map(m => (
                 <div key={m.id || m.mssv || m.name} className="flex flex-col items-center min-w-[105px] px-2 shrink-0">
                   <img 
                     src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
@@ -267,6 +293,25 @@ export default function HomeScreen() {
             </span>
           </div>
         )}
+
+        {/* 5. Custom / Other Roles */}
+        {otherList.map(m => (
+          <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between min-w-[110px] px-3 shrink-0 bg-slate-50/80 py-2.5 rounded-2xl border border-slate-200/60">
+            <div className="flex flex-col items-center w-full">
+              <img 
+                src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                alt={m.name} 
+                className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
+              />
+              <span className="text-[11px] mt-1.5 font-bold text-slate-800 text-center whitespace-nowrap px-0.5" title={m.name}>
+                {m.name}
+              </span>
+            </div>
+            <span className={`text-[9px] ${textClass} font-extrabold uppercase text-center mt-2 pt-1.5 border-t border-slate-200/80 w-full tracking-tight whitespace-nowrap px-1`}>
+              {m.committeeRole.toUpperCase()}
+            </span>
+          </div>
+        ))}
       </div>
     );
   };
