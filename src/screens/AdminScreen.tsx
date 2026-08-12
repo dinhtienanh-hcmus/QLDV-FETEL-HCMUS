@@ -93,6 +93,7 @@ export default function AdminScreen() {
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
   const [editingBranchName, setEditingBranchName] = useState('');
   const [deletingBranch, setDeletingBranch] = useState<{ id: string; name: string } | null>(null);
+  const [deletingUser, setDeletingUser] = useState<any | null>(null);
   const [branchesSeeded, setBranchesSeeded] = useState(false);
 
   const DEFAULT_BRANCHES = [
@@ -855,12 +856,13 @@ export default function AdminScreen() {
     }
   };
 
-  const handleDeleteUser = async (u: any) => {
-    const nameStr = u.name || u.email || u.username || u.id;
-    if (!window.confirm(`Bạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản "${nameStr}" (ID: ${u.id})?`)) return;
+  const confirmDeleteUser = async () => {
+    if (!deletingUser) return;
+    const nameStr = deletingUser.name || deletingUser.email || deletingUser.username || deletingUser.id;
     try {
-      await deleteDoc(doc(db, 'users', u.id));
-      setUsersList(prev => prev.filter(item => item.id !== u.id));
+      await deleteDoc(doc(db, 'users', deletingUser.id));
+      setUsersList(prev => prev.filter(item => item.id !== deletingUser.id));
+      setDeletingUser(null);
       alert(`Đã xóa tài khoản "${nameStr}" thành công.`);
     } catch (e) {
       console.error(e);
@@ -1628,7 +1630,7 @@ export default function AdminScreen() {
                             <button onClick={() => handleEditUser(u)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
                                <Edit2 size={12} className="mr-1" /> Sửa
                             </button>
-                            <button onClick={() => handleDeleteUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                            <button onClick={() => setDeletingUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
                                <Trash2 size={12} className="mr-1" /> Xóa
                             </button>
                          </div>
@@ -1721,7 +1723,7 @@ export default function AdminScreen() {
                                 <button onClick={() => handleOpenBchEdit(u)} className="p-1.5 text-blue-600 bg-white hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
                                    <Edit2 size={12} className="mr-1" /> Cập nhật
                                 </button>
-                                <button onClick={() => handleDeleteUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                                <button onClick={() => setDeletingUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
                                    <Trash2 size={12} className="mr-1" /> Xóa
                                 </button>
                              </div>
@@ -1754,7 +1756,7 @@ export default function AdminScreen() {
                                 <button onClick={() => handleOpenBchEdit(u)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[9px] font-bold">
                                    + Thêm vào BCH
                                 </button>
-                                <button onClick={() => handleDeleteUser(u)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa tài khoản">
+                                <button onClick={() => setDeletingUser(u)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa tài khoản">
                                    <Trash2 size={12} />
                                 </button>
                              </div>
@@ -2063,6 +2065,33 @@ export default function AdminScreen() {
               <button 
                 type="button" 
                 onClick={confirmDeleteBranch} 
+                className="flex-1 py-2.5 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 text-xs shadow-md transition cursor-pointer"
+              >
+                Xóa ngay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingUser && (
+        <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl p-5 border border-slate-100">
+            <h3 className="font-bold text-slate-800 text-base mb-2">Xác nhận xóa tài khoản</h3>
+            <p className="text-xs text-slate-600 mb-5">
+              Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản <span className="font-bold text-slate-900">{deletingUser.name || deletingUser.email || deletingUser.username || deletingUser.id}</span> khỏi hệ thống? Thao tác này không thể khôi phục.
+            </p>
+            <div className="flex space-x-3">
+              <button 
+                type="button" 
+                onClick={() => setDeletingUser(null)} 
+                className="flex-1 py-2.5 rounded-xl font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs transition cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button 
+                type="button" 
+                onClick={confirmDeleteUser} 
                 className="flex-1 py-2.5 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 text-xs shadow-md transition cursor-pointer"
               >
                 Xóa ngay
