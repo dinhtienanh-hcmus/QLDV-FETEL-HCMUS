@@ -11,17 +11,14 @@ import {
   ShieldCheck,
   User,
   Mail,
-  Key,
   Save,
-  Send,
   Building,
   CreditCard,
   Edit3
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { collection, query, getDocs, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { auth, db } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { Html5Qrcode } from 'html5-qrcode';
 
 interface UserActivity {
@@ -54,16 +51,10 @@ export default function QRScreen() {
   const [editName, setEditName] = useState(currentUser?.name || '');
   const [editMssv, setEditMssv] = useState(currentUser?.mssv || '');
   const [editBranch, setEditBranch] = useState(currentUser?.branch || '');
-  const [editEmail, setEditEmail] = useState(currentUser?.email || '');
 
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
   const [updateErr, setUpdateErr] = useState<string | null>(null);
-
-  // Password Reset States
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetMsg, setResetMsg] = useState<string | null>(null);
-  const [resetErr, setResetErr] = useState<string | null>(null);
 
   // Camera scanner states
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -79,7 +70,6 @@ export default function QRScreen() {
       setEditName(currentUser.name || '');
       setEditMssv(currentUser.mssv || '');
       setEditBranch(currentUser.branch || '');
-      setEditEmail(currentUser.email || '');
     }
   }, [currentUser]);
 
@@ -297,7 +287,6 @@ export default function QRScreen() {
         name: editName.trim(),
         mssv: editMssv.trim(),
         branch: editBranch.trim(),
-        email: editEmail.trim(),
       });
       setUpdateMsg('Cập nhật thông tin cá nhân thành công!');
     } catch (err: any) {
@@ -305,35 +294,6 @@ export default function QRScreen() {
       setUpdateErr(err.message || 'Cập nhật thất bại. Vui lòng thử lại.');
     } finally {
       setUpdateLoading(false);
-    }
-  };
-
-  const handleSendPasswordReset = async () => {
-    setResetMsg(null);
-    setResetErr(null);
-
-    const emailToSend = editEmail.trim() || currentUser?.email || '';
-    if (!emailToSend) {
-      setResetErr('Vui lòng nhập địa chỉ Email để nhận liên kết đổi mật khẩu.');
-      return;
-    }
-
-    setResetLoading(true);
-
-    try {
-      await sendPasswordResetEmail(auth, emailToSend);
-      setResetMsg(`Đường dẫn đặt lại mật khẩu đã được gửi đến địa chỉ email ${emailToSend}. Vui lòng kiểm tra hộp thư (kể cả thư rác / Spam) để cập nhật mật khẩu mới.`);
-    } catch (err: any) {
-      console.error("Error sending password reset email:", err);
-      let msg = err.message || 'Không thể gửi email đặt lại mật khẩu.';
-      if (err.code === 'auth/user-not-found') {
-        msg = `Không tìm thấy tài khoản tương ứng với email ${emailToSend}. Bạn có thể bấm "Lưu thông tin cá nhân" phía trên trước.`;
-      } else if (err.code === 'auth/invalid-email') {
-        msg = 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại.';
-      }
-      setResetErr(msg);
-    } finally {
-      setResetLoading(false);
     }
   };
 
@@ -577,24 +537,6 @@ export default function QRScreen() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center">
-                    <Mail size={14} className="mr-1.5 text-blue-600" />
-                    Địa chỉ Email liên hệ / Khôi phục mật khẩu
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    placeholder="VD: emailcuaban@gmail.com"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Địa chỉ email này dùng để nhận liên kết khôi phục / đổi mật khẩu khi cần thiết.
-                  </p>
-                </div>
-
                 <div className="pt-2">
                   <button
                     type="submit"
@@ -615,53 +557,6 @@ export default function QRScreen() {
                   </button>
                 </div>
               </form>
-            </div>
-
-            {/* Password Reset Section */}
-            <div className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center">
-                  <Key size={17} className="mr-2 text-amber-600" />
-                  Đổi mật khẩu / Khôi phục mật khẩu
-                </h3>
-              </div>
-
-              <p className="text-xs text-slate-600 mb-4 leading-relaxed">
-                Hệ thống sẽ gửi một liên kết đổi mật khẩu bảo mật đến địa chỉ email cá nhân của bạn. Nhấp vào liên kết trong thư để đặt mật khẩu mới.
-              </p>
-
-              {resetMsg && (
-                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-start space-x-2">
-                  <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
-                  <span>{resetMsg}</span>
-                </div>
-              )}
-
-              {resetErr && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 text-xs flex items-start space-x-2">
-                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                  <span>{resetErr}</span>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={handleSendPasswordReset}
-                disabled={resetLoading}
-                className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-60"
-              >
-                {resetLoading ? (
-                  <>
-                    <RefreshCw size={15} className="animate-spin" />
-                    <span>Đang gửi liên kết...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send size={15} />
-                    <span>Gửi email liên kết đặt lại mật khẩu</span>
-                  </>
-                )}
-              </button>
             </div>
           </div>
         )}
