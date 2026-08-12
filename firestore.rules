@@ -17,7 +17,7 @@ service cloud.firestore {
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
     function isAdmin() {
       return isSignedIn() && (
-        (request.auth.token.email != null && request.auth.token.email.lower() in ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com']) ||
+        (request.auth.token.email != null && request.auth.token.email.lower() in ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com', 'dinhtienanh235@gmail.com']) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
@@ -83,8 +83,8 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn(); // Allow all to read for basic profile finding
+      allow get: if true;
+      allow list: if true; // Allow reading for checking branch duplicates
       allow create: if isSignedIn();
       allow update: if isSignedIn() && (isAdmin() || isOwner(userId) || isBranchManager());
       allow delete: if isAdmin() || isOwner(userId) || isBranchManager();
@@ -96,7 +96,7 @@ service cloud.firestore {
     }
     
     match /branches/{branchId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin();
     }
     
