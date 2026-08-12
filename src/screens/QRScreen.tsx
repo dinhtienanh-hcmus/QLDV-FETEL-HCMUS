@@ -1,7 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import QRCode from 'react-qr-code';
 import { 
-  QrCode, 
   Scan, 
   Upload, 
   CheckCircle2, 
@@ -10,11 +8,20 @@ import {
   RefreshCw, 
   Calendar, 
   Sparkles, 
-  ShieldCheck
+  ShieldCheck,
+  User,
+  Mail,
+  Key,
+  Save,
+  Send,
+  Building,
+  CreditCard,
+  Edit3
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { collection, query, getDocs, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth, db } from '../lib/firebase';
 import { Html5Qrcode } from 'html5-qrcode';
 
 interface UserActivity {
@@ -31,12 +38,32 @@ interface ScanFeedback {
   activityName?: string;
 }
 
+const DEFAULT_BRANCHES = [
+  '25ICD1', '25DTV1', '25DTV2', '25DTV_DKD',
+  '26ICD1', '26DTV1', '26DTV2', '26DTV_DKD'
+];
+
 export default function QRScreen() {
-  const { currentUser } = useAuth();
+  const { currentUser, updateUserProfile } = useAuth();
   const displayName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Người dùng';
 
-  const [activeTab, setActiveTab] = useState<'scan' | 'myqr'>('scan');
+  const [activeTab, setActiveTab] = useState<'scan' | 'profile'>('scan');
   const [userActivities, setUserActivities] = useState<UserActivity[]>([]);
+
+  // Profile Edit States
+  const [editName, setEditName] = useState(currentUser?.name || '');
+  const [editMssv, setEditMssv] = useState(currentUser?.mssv || '');
+  const [editBranch, setEditBranch] = useState(currentUser?.branch || '');
+  const [editEmail, setEditEmail] = useState(currentUser?.email || '');
+
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState<string | null>(null);
+  const [updateErr, setUpdateErr] = useState<string | null>(null);
+
+  // Password Reset States
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMsg, setResetMsg] = useState<string | null>(null);
+  const [resetErr, setResetErr] = useState<string | null>(null);
 
   // Camera scanner states
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -46,6 +73,15 @@ export default function QRScreen() {
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (currentUser) {
+      setEditName(currentUser.name || '');
+      setEditMssv(currentUser.mssv || '');
+      setEditBranch(currentUser.branch || '');
+      setEditEmail(currentUser.email || '');
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser?.uid) return;
@@ -105,7 +141,6 @@ export default function QRScreen() {
     setCameraError(null);
     setIsCameraActive(true);
 
-    // Wait for DOM container render
     setTimeout(async () => {
       try {
         if (!scannerRef.current) {
@@ -121,9 +156,7 @@ export default function QRScreen() {
           (decodedText) => {
             handleScanSuccess(decodedText);
           },
-          () => {
-            // Frame scan error - safe to ignore
-          }
+          () => {}
         );
       } catch (err) {
         console.error("Error starting camera:", err);
@@ -154,13 +187,11 @@ export default function QRScreen() {
       let activityId = '';
       let activityName = '';
 
-      // Try to parse JSON from 10s dynamic QR code
       try {
         const parsed = JSON.parse(rawQrContent);
         activityId = parsed.activityId || '';
         activityName = parsed.activityName || '';
       } catch {
-        // Fallback: raw QR text string might be the activity ID
         activityId = rawQrContent.trim();
       }
 
@@ -174,7 +205,6 @@ export default function QRScreen() {
         return;
       }
 
-      // Check if activity exists in Firestore
       const actDocRef = doc(db, 'activities', activityId);
       const actSnap = await getDoc(actDocRef);
 
@@ -191,7 +221,6 @@ export default function QRScreen() {
       const actData = actSnap.data();
       const realActName = activityName || actData.name || 'Hoạt động Đoàn';
 
-      // Check existing registration
       const regRef = doc(db, 'activities', activityId, 'registrations', currentUser!.uid);
       const regSnap = await getDoc(regRef);
 
@@ -203,7 +232,6 @@ export default function QRScreen() {
           activityName: realActName
         });
       } else {
-        // Mark attendance in Firestore
         await setDoc(regRef, {
           userId: currentUser!.uid,
           status: 'attended',
@@ -218,7 +246,6 @@ export default function QRScreen() {
           activityName: realActName
         });
 
-        // Refresh attendance history
         fetchUserActivities();
       }
     } catch (err) {
@@ -259,6 +286,57 @@ export default function QRScreen() {
     }
   };
 
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUpdateMsg(null);
+    setUpdateErr(null);
+    setUpdateLoading(true);
+
+    try {
+      await updateUserProfile({
+        name: editName.trim(),
+        mssv: editMssv.trim(),
+        branch: editBranch.trim(),
+        email: editEmail.trim(),
+      });
+      setUpdateMsg('Cập nhật thông tin cá nhân thành công!');
+    } catch (err: any) {
+      console.error("Lỗi cập nhật profile:", err);
+      setUpdateErr(err.message || 'Cập nhật thất bại. Vui lòng thử lại.');
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleSendPasswordReset = async () => {
+    setResetMsg(null);
+    setResetErr(null);
+
+    const emailToSend = editEmail.trim() || currentUser?.email || '';
+    if (!emailToSend) {
+      setResetErr('Vui lòng nhập địa chỉ Email để nhận liên kết đổi mật khẩu.');
+      return;
+    }
+
+    setResetLoading(true);
+
+    try {
+      await sendPasswordResetEmail(auth, emailToSend);
+      setResetMsg(`Đường dẫn đặt lại mật khẩu đã được gửi đến địa chỉ email ${emailToSend}. Vui lòng kiểm tra hộp thư (kể cả thư rác / Spam) để cập nhật mật khẩu mới.`);
+    } catch (err: any) {
+      console.error("Error sending password reset email:", err);
+      let msg = err.message || 'Không thể gửi email đặt lại mật khẩu.';
+      if (err.code === 'auth/user-not-found') {
+        msg = `Không tìm thấy tài khoản tương ứng với email ${emailToSend}. Bạn có thể bấm "Lưu thông tin cá nhân" phía trên trước.`;
+      } else if (err.code === 'auth/invalid-email') {
+        msg = 'Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại.';
+      }
+      setResetErr(msg);
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-y-auto">
       {/* Hidden container for file scanning */}
@@ -268,10 +346,10 @@ export default function QRScreen() {
       <div className="bg-blue-800 text-white p-5 pt-8 shrink-0 shadow-md">
         <div className="flex items-center space-x-2">
           <Scan className="w-6 h-6 text-blue-200" />
-          <h2 className="text-lg font-bold">Điểm danh Hoạt động</h2>
+          <h2 className="text-lg font-bold">Cá nhân & Điểm danh</h2>
         </div>
         <p className="text-xs text-blue-100 opacity-80 mt-1">
-          Quét mã QR hoạt động hoặc trình mã cá nhân để ghi nhận tham gia
+          Quét mã QR hoạt động Đoàn và Quản lý thông tin cá nhân
         </p>
 
         {/* Tab Selector */}
@@ -295,16 +373,16 @@ export default function QRScreen() {
             type="button"
             onClick={() => {
               stopCameraScanner();
-              setActiveTab('myqr');
+              setActiveTab('profile');
             }}
             className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center space-x-1.5 cursor-pointer ${
-              activeTab === 'myqr'
+              activeTab === 'profile'
                 ? 'bg-white text-blue-900 shadow-sm'
                 : 'text-blue-200 hover:text-white'
             }`}
           >
-            <QrCode size={15} />
-            <span>Mã QR Cá nhân</span>
+            <User size={15} />
+            <span>Thông tin cá nhân</span>
           </button>
         </div>
       </div>
@@ -397,10 +475,10 @@ export default function QRScreen() {
           </div>
         )}
 
-        {/* TAB 2: MY PERSONAL QR CARD */}
-        {activeTab === 'myqr' && (
-          <div className="space-y-4">
-            {/* Profile Card */}
+        {/* TAB 2: THÔNG TIN CÁ NHÂN & ĐỔI MẬT KHẨU */}
+        {activeTab === 'profile' && (
+          <div className="space-y-6">
+            {/* Overview Card */}
             <div className="w-full p-5 bg-gradient-to-br from-blue-700 to-blue-900 rounded-2xl text-white relative overflow-hidden shadow-md">
               <div className="absolute -right-4 -top-4 w-28 h-28 bg-white/10 rounded-full blur-sm"></div>
               <div className="flex items-center space-x-3.5 mb-4 relative z-10">
@@ -412,8 +490,10 @@ export default function QRScreen() {
                   />
                 </div>
                 <div>
-                  <div className="text-sm font-bold line-clamp-1">{displayName}</div>
-                  <div className="text-xs text-blue-200 font-mono">MSSV: {currentUser?.mssv || '---'}</div>
+                  <div className="text-base font-bold line-clamp-1">{displayName}</div>
+                  <div className="text-xs text-blue-200 font-mono">
+                    {currentUser?.mssv ? `MSSV: ${currentUser.mssv}` : 'Đơn vị Chi đoàn / Admin'}
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs pt-3 border-t border-white/15 relative z-10">
@@ -422,15 +502,166 @@ export default function QRScreen() {
               </div>
             </div>
 
-            {/* Personal QR Display */}
-            <div className="flex flex-col items-center p-6 bg-white border border-slate-200 rounded-2xl w-full shadow-sm text-center">
-              <div className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm mb-3">
-                <QRCode value={currentUser?.mssv || '000'} size={170} fgColor="#0f172a" level="Q" />
+            {/* Profile Form */}
+            <div className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center">
+                  <Edit3 size={17} className="mr-2 text-blue-600" />
+                  Chỉnh sửa Thông tin Cá nhân
+                </h3>
               </div>
-              <div className="text-xs font-bold text-slate-800">{displayName} - {currentUser?.mssv || '---'}</div>
-              <p className="text-[11px] text-slate-500 font-medium italic mt-1">
-                Trình mã QR này để Ban Chấp Hành quét điểm danh thủ công khi cần.
+
+              {updateMsg && (
+                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center space-x-2">
+                  <CheckCircle2 size={16} className="shrink-0" />
+                  <span>{updateMsg}</span>
+                </div>
+              )}
+
+              {updateErr && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 text-xs flex items-center space-x-2">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span>{updateErr}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSaveProfile} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center">
+                    <User size={14} className="mr-1.5 text-slate-400" />
+                    Họ và tên
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="VD: Nguyễn Văn A"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center">
+                      <CreditCard size={14} className="mr-1.5 text-slate-400" />
+                      Mã số sinh viên (MSSV)
+                    </label>
+                    <input
+                      type="text"
+                      value={editMssv}
+                      onChange={(e) => setEditMssv(e.target.value)}
+                      placeholder="VD: 22120001"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center">
+                      <Building size={14} className="mr-1.5 text-slate-400" />
+                      Chi đoàn / Đơn vị
+                    </label>
+                    <input
+                      type="text"
+                      list="branch-list-options"
+                      value={editBranch}
+                      onChange={(e) => setEditBranch(e.target.value)}
+                      placeholder="VD: 25DTV1"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+                    />
+                    <datalist id="branch-list-options">
+                      {DEFAULT_BRANCHES.map(b => (
+                        <option key={b} value={b} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center">
+                    <Mail size={14} className="mr-1.5 text-blue-600" />
+                    Địa chỉ Email liên hệ / Khôi phục mật khẩu
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    placeholder="VD: emailcuaban@gmail.com"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Địa chỉ email này dùng để nhận liên kết khôi phục / đổi mật khẩu khi cần thiết.
+                  </p>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={updateLoading}
+                    className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-60"
+                  >
+                    {updateLoading ? (
+                      <>
+                        <RefreshCw size={15} className="animate-spin" />
+                        <span>Đang lưu thông tin...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save size={15} />
+                        <span>Lưu thay đổi Thông tin cá nhân</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Password Reset Section */}
+            <div className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center">
+                  <Key size={17} className="mr-2 text-amber-600" />
+                  Đổi mật khẩu / Khôi phục mật khẩu
+                </h3>
+              </div>
+
+              <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+                Hệ thống sẽ gửi một liên kết đổi mật khẩu bảo mật đến địa chỉ email cá nhân của bạn. Nhấp vào liên kết trong thư để đặt mật khẩu mới.
               </p>
+
+              {resetMsg && (
+                <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-start space-x-2">
+                  <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+                  <span>{resetMsg}</span>
+                </div>
+              )}
+
+              {resetErr && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-800 text-xs flex items-start space-x-2">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <span>{resetErr}</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSendPasswordReset}
+                disabled={resetLoading}
+                className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-60"
+              >
+                {resetLoading ? (
+                  <>
+                    <RefreshCw size={15} className="animate-spin" />
+                    <span>Đang gửi liên kết...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send size={15} />
+                    <span>Gửi email liên kết đặt lại mật khẩu</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}

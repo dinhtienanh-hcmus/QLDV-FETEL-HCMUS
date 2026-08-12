@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, QrCode, BookOpen, Settings, ScanLine } from 'lucide-react';
+import { Home, QrCode, BookOpen, Settings, ScanLine, User as UserIcon } from 'lucide-react';
 import HomeScreen from './screens/HomeScreen';
 import QRScreen from './screens/QRScreen';
 import HandbookScreen from './screens/HandbookScreen';
@@ -46,7 +46,7 @@ function AppContent() {
               <div className="flex-1 px-4 flex flex-col gap-1.5">
                 <SidebarItem icon={Home} label="Trang chủ" isActive={currentTab === 'home'} onClick={() => setCurrentTab('home')} />
                 {isDoanVien && (
-                  <SidebarItem icon={QrCode} label="Quét mã & QR" isActive={currentTab === 'qr'} onClick={() => setCurrentTab('qr')} />
+                  <SidebarItem icon={UserIcon} label="Điểm danh & Cá nhân" isActive={currentTab === 'qr'} onClick={() => setCurrentTab('qr')} />
                 )}
                 <SidebarItem icon={BookOpen} label="Sổ tay Đoàn viên" isActive={currentTab === 'handbook'} onClick={() => setCurrentTab('handbook')} />
                 {canScan && (
@@ -73,7 +73,7 @@ function AppContent() {
             <div className="md:hidden h-[60px] border-t border-slate-100 bg-white flex items-center px-2 shrink-0 z-20">
               <TabItem icon={Home} label="Trang chủ" isActive={currentTab === 'home'} onClick={() => setCurrentTab('home')} />
               {isDoanVien && (
-                <TabItem icon={QrCode} label="Mã QR" isActive={currentTab === 'qr'} onClick={() => setCurrentTab('qr')} />
+                <TabItem icon={UserIcon} label="Cá nhân" isActive={currentTab === 'qr'} onClick={() => setCurrentTab('qr')} />
               )}
               <TabItem icon={BookOpen} label="Sổ tay" isActive={currentTab === 'handbook'} onClick={() => setCurrentTab('handbook')} />
               {canScan && (

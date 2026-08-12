@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User as FirebaseUser, onAuthStateChanged, signOut } from 'firebase/auth';
+import { User as FirebaseUser, onAuthStateChanged, signOut, updateEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
@@ -18,7 +18,7 @@ interface AuthContextType {
   currentUser: AppUser | null;
   loading: boolean;
   logout: () => Promise<void>;
-  updateUserProfile: (data: { name: string; mssv: string; branch: string }) => Promise<void>;
+  updateUserProfile: (data: { name: string; mssv: string; branch: string; email?: string }) => Promise<void>;
   updateUserAvatar: (avatarUrl: string) => Promise<void>;
 }
 
@@ -192,15 +192,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return signOut(auth);
   };
 
-  const updateUserProfile = async (data: { name: string; mssv: string; branch: string }) => {
+  const updateUserProfile = async (data: { name: string; mssv: string; branch: string; email?: string }) => {
     if (!auth.currentUser) return;
     const userDocRef = doc(db, 'users', auth.currentUser.uid);
     const userEmailLower = auth.currentUser.email?.toLowerCase() || '';
     const adminEmails = ['dkdtvt.hcmus@gmail.com'];
     const isDefaultAdmin = adminEmails.includes(userEmailLower);
 
+    let newEmail = auth.currentUser.email || '';
+    if (data.email && data.email.trim() && data.email.trim() !== auth.currentUser.email) {
+      newEmail = data.email.trim();
+      try {
+        await updateEmail(auth.currentUser, newEmail);
+      } catch (err) {
+        console.warn("Could not update auth email directly (may require recent login):", err);
+      }
+    }
+
     const updatedData: any = {
-      email: auth.currentUser.email || '',
+      email: newEmail,
       name: data.name,
       role: isDefaultAdmin ? 'admin' : (currentUser?.role || 'doanvien'),
       branch: data.branch,
@@ -215,6 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!prev) return null;
       return {
         ...prev,
+        email: newEmail,
         name: data.name,
         mssv: data.mssv,
         branch: data.branch,
