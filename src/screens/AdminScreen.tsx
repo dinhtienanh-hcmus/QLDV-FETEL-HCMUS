@@ -7,6 +7,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
 import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS } from '../utils/termUtils';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 
 interface Organizer {
   mssv: string;
@@ -370,6 +371,49 @@ export default function AdminScreen() {
     } finally {
       setLoadingUsers(false);
     }
+  };
+
+  const COLORS = [
+    '#2563eb', // blue
+    '#059669', // emerald
+    '#d97706', // amber
+    '#7c3aed', // violet
+    '#db2777', // pink
+    '#ea580c', // orange
+    '#e11d48', // rose
+    '#0d9488', // teal
+    '#0891b2', // cyan
+    '#4f46e5'  // indigo
+  ];
+
+  const getBranchStats = () => {
+    const statsMap: { [key: string]: number } = {};
+    const knownBranches = Array.from(new Set([
+      ...branches.map(b => b.name),
+      ...DEFAULT_BRANCHES
+    ]));
+
+    knownBranches.forEach(b => {
+      statsMap[b] = 0;
+    });
+
+    let totalDoanVien = 0;
+    usersList.forEach(usr => {
+      if (usr.role === 'doanvien' && usr.branch) {
+        const bName = usr.branch.trim();
+        if (bName) {
+          statsMap[bName] = (statsMap[bName] || 0) + 1;
+          totalDoanVien++;
+        }
+      }
+    });
+
+    const chartData = Object.entries(statsMap)
+      .map(([name, value]) => ({ name: `Chi đoàn ${name}`, value }))
+      .filter(item => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    return { chartData, totalDoanVien };
   };
 
   const fetchActivities = async () => {
@@ -1227,6 +1271,101 @@ export default function AdminScreen() {
 
         {activeTab === 'branches' && isAdmin && (
           <div className="space-y-4">
+            {/* Thống kê Đoàn viên */}
+            {(() => {
+              const { chartData, totalDoanVien } = getBranchStats();
+              return (
+                <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 flex items-center">
+                        <Users size={18} className="mr-2 text-blue-600"/> Thống kê Đoàn viên theo Chi đoàn
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Phân tích mật độ đoàn viên giữa các chi đoàn trực thuộc Khoa</p>
+                    </div>
+                    <div className="bg-blue-50 text-blue-700 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-sm border border-blue-100 shrink-0">
+                      Tổng số: <span className="text-sm font-extrabold">{totalDoanVien}</span> đoàn viên
+                    </div>
+                  </div>
+
+                  {chartData.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400 text-xs italic">
+                      Chưa có dữ liệu đoàn viên để hiển thị biểu đồ.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                      <div className="lg:col-span-5 flex justify-center">
+                        <div className="w-full max-w-[280px] h-[260px] relative">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={chartData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={85}
+                                paddingAngle={3}
+                                dataKey="value"
+                              >
+                                {chartData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip 
+                                contentStyle={{ 
+                                  backgroundColor: '#fff', 
+                                  border: '1px solid #e2e8f0',
+                                  borderRadius: '12px',
+                                  fontSize: '11px',
+                                  fontWeight: '600',
+                                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                                }}
+                                formatter={(value: number) => [`${value} đoàn viên`, 'Số lượng']}
+                              />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          {/* Nhãn trung tâm của biểu đồ donut */}
+                          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-1">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Đoàn viên</span>
+                            <span className="text-2xl font-black text-slate-800">{totalDoanVien}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="lg:col-span-7 space-y-2 max-h-[260px] overflow-y-auto pr-2 no-scrollbar">
+                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 grid grid-cols-12 px-2">
+                          <span className="col-span-7">Chi đoàn</span>
+                          <span className="col-span-2 text-right">Số lượng</span>
+                          <span className="col-span-3 text-right">Tỷ lệ</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {chartData.map((item, index) => {
+                            const percent = totalDoanVien > 0 ? ((item.value / totalDoanVien) * 100).toFixed(1) : '0';
+                            const color = COLORS[index % COLORS.length];
+                            return (
+                              <div key={item.name} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:bg-slate-100/50 transition-colors text-xs font-semibold text-slate-700 grid grid-cols-12">
+                                <div className="col-span-7 flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                                  <span className="truncate">{item.name}</span>
+                                </div>
+                                <span className="col-span-2 text-right font-bold text-slate-800">{item.value}</span>
+                                <div className="col-span-3 text-right flex items-center justify-end gap-1.5">
+                                  <span className="text-[10px] text-slate-400 font-medium">({percent}%)</span>
+                                  <div className="w-12 bg-slate-200 h-1.5 rounded-full overflow-hidden shrink-0 hidden sm:block">
+                                    <div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: color }} />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
                 <PlusCircle size={16} className="mr-1.5 text-blue-600"/> Thêm Chi đoàn mới
