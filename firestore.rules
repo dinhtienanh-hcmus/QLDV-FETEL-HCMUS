@@ -17,7 +17,7 @@ service cloud.firestore {
     function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
     function isAdmin() {
       return isSignedIn() && (
-        (request.auth.token.email != null && request.auth.token.email.lower() in ['dkdtvt.hcmus@gmail.com']) ||
+        (request.auth.token.email != null && request.auth.token.email.lower() in ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com']) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );

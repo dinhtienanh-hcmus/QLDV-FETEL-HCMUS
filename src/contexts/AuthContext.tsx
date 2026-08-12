@@ -44,7 +44,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userDocSnap = await getDoc(userDocRef);
           
-          const adminEmails = ['dkdtvt.hcmus@gmail.com'];
+          const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com'];
           const userEmailLower = firebaseUser.email?.toLowerCase() || '';
           const isDefaultAdmin = adminEmails.includes(userEmailLower);
           

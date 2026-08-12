@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -6,17 +6,43 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
 } from 'firebase/auth';
-import { auth } from '../lib/firebase';
-import { Lock, AlertCircle, User as UserIcon, LogIn, UserPlus } from 'lucide-react';
+import { collection, query, getDocs, doc, setDoc, orderBy } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
+import { Lock, AlertCircle, User as UserIcon, LogIn, UserPlus, Users } from 'lucide-react';
+
+const DEFAULT_BRANCHES = [
+  '25ICD1', '25DTV1', '25DTV2', '25DTV_DKD',
+  '26ICD1', '26DTV1', '26DTV2', '26DTV_DKD'
+];
 
 export default function LoginScreen() {
   const [activeTab, setActiveTab] = useState<'doanvien' | 'bch'>('doanvien');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginId, setLoginId] = useState('');
+  const [selectedBranch, setSelectedBranch] = useState('25ICD1');
+  const [customBranch, setCustomBranch] = useState('');
+  const [branchOptions, setBranchOptions] = useState<string[]>(DEFAULT_BRANCHES);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchBranches = async () => {
+      try {
+        const q = query(collection(db, 'branches'), orderBy('name', 'asc'));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const fetchedNames = snap.docs.map(d => d.data().name as string);
+          const combined = Array.from(new Set([...fetchedNames, ...DEFAULT_BRANCHES]));
+          setBranchOptions(combined);
+        }
+      } catch (err) {
+        console.error('Error loading branches:', err);
+      }
+    };
+    fetchBranches();
+  }, []);
 
   const getEmail = (id: string) => {
     const trimmed = id.trim().toLowerCase();
@@ -43,10 +69,49 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      const email = getEmail(loginId);
       if (isSignUp) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const finalBranch = (selectedBranch === 'OTHER' ? customBranch : selectedBranch).trim();
+        if (!finalBranch) {
+          setError('Vui lòng chọn hoặc nhập tên Chi đoàn.');
+          setLoading(false);
+          return;
+        }
+
+        // 1. Check if a Chi đoàn account already exists for this branch
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const searchBranchLower = finalBranch.toLowerCase();
+        const duplicate = usersSnap.docs.find(d => {
+          const u = d.data();
+          const uBranch = (u.branch || '').toLowerCase().trim();
+          const uEmail = (u.email || u.authEmail || '').toLowerCase();
+          return (u.role === 'chidoan' || uEmail.includes('chidoan')) && uBranch === searchBranchLower;
+        });
+
+        if (duplicate) {
+          setError(`Chi đoàn "${finalBranch}" đã có tài khoản quản lý trên hệ thống. Mỗi Chi đoàn chỉ được cấp 01 tài khoản Chi đoàn.`);
+          setLoading(false);
+          return;
+        }
+
+        // 2. Create account with standardized email username
+        const cleanBranchUname = finalBranch.toLowerCase().replace(/\s+/g, '');
+        const authEmail = `${cleanBranchUname}.fetel@chidoan.fetel`;
+        const userCred = await createUserWithEmailAndPassword(auth, authEmail, password || 'Abc@123');
+
+        // 3. Save user doc in Firestore
+        await setDoc(doc(db, 'users', userCred.user.uid), {
+          email: '',
+          authEmail: authEmail,
+          username: `${cleanBranchUname}.fetel`,
+          name: `BCH Chi đoàn ${finalBranch}`,
+          role: 'chidoan',
+          branch: finalBranch,
+          createdAt: Date.now()
+        });
+
+        setMessage(`Tạo tài khoản thành công cho Chi đoàn ${finalBranch}! Tên đăng nhập: ${cleanBranchUname}.fetel`);
       } else {
+        const email = getEmail(loginId);
         await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (err: any) {
@@ -55,7 +120,7 @@ export default function LoginScreen() {
       if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
         errMsg = 'Tài khoản hoặc mật khẩu không chính xác.';
       } else if (err.code === 'auth/email-already-in-use') {
-        errMsg = 'Tài khoản / email này đã được đăng ký.';
+        errMsg = 'Chi đoàn này hoặc email này đã có tài khoản đăng ký.';
       } else if (err.code === 'auth/weak-password') {
         errMsg = 'Mật khẩu phải có ít nhất 6 ký tự.';
       }
@@ -205,24 +270,65 @@ export default function LoginScreen() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-3.5">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase ml-1">
-                    Mã Chi đoàn / Tên đăng nhập / Email
-                  </label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <UserIcon size={16} />
+                {isSignUp ? (
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase ml-1">
+                      Chọn Chi đoàn trực thuộc
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <Users size={16} />
+                      </div>
+                      <select
+                        value={selectedBranch}
+                        onChange={(e) => setSelectedBranch(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-semibold cursor-pointer"
+                      >
+                        {branchOptions.map((bName) => (
+                          <option key={bName} value={bName}>
+                            Chi đoàn {bName}
+                          </option>
+                        ))}
+                        <option value="OTHER">-- Chi đoàn khác (Nhập tên)... --</option>
+                      </select>
                     </div>
-                    <input
-                      type="text"
-                      required
-                      value={loginId}
-                      onChange={(e) => setLoginId(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
-                      placeholder="Ví dụ: 25dtv1.fetel, admin..."
-                    />
+
+                    {selectedBranch === 'OTHER' && (
+                      <div className="mt-2.5">
+                        <input
+                          type="text"
+                          required
+                          value={customBranch}
+                          onChange={(e) => setCustomBranch(e.target.value)}
+                          placeholder="Nhập tên Chi đoàn (VD: 27ICD1, 27DTV1...)"
+                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all text-xs text-slate-800"
+                        />
+                      </div>
+                    )}
+                    <p className="text-[10px] text-slate-500 mt-1 ml-1 leading-normal">
+                      Mỗi Chi đoàn chỉ được phép có <strong>01 tài khoản duy nhất</strong>. Nếu Chi đoàn đã chọn đã tồn tại, hệ thống sẽ ngăn khởi tạo trùng lặp.
+                    </p>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1 uppercase ml-1">
+                      Mã Chi đoàn / Tên đăng nhập / Email
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <UserIcon size={16} />
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={loginId}
+                        onChange={(e) => setLoginId(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
+                        placeholder="Ví dụ: 25dtv1.fetel, admin..."
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <div className="flex justify-between items-end mb-1 ml-1">

@@ -559,6 +559,25 @@ export default function AdminScreen() {
         }, { merge: true });
         alert(`Đã tạo hồ sơ Đoàn viên cho ${newName} (${cleanUname}).\nĐoàn viên sẽ tự đăng nhập bằng Google!`);
       } else if (newRole === 'chidoan') {
+        const targetBranch = newBranch.trim();
+        if (!targetBranch) {
+          alert('Vui lòng chọn hoặc nhập tên Chi đoàn!');
+          setCreatingAccount(false);
+          return;
+        }
+
+        const duplicate = usersList.find((u: any) => {
+          const uBranch = (u.branch || '').toLowerCase().trim();
+          const searchBranch = targetBranch.toLowerCase().trim();
+          return (u.role === 'chidoan' || u.email?.includes('chidoan') || u.authEmail?.includes('chidoan')) && uBranch === searchBranch;
+        });
+
+        if (duplicate) {
+          alert(`Chi đoàn "${targetBranch}" đã có tài khoản quản lý trên hệ thống! Mỗi Chi đoàn chỉ được phép có 01 tài khoản Chi đoàn.`);
+          setCreatingAccount(false);
+          return;
+        }
+
         const rawUname = newUsername.trim().toLowerCase();
         const username = rawUname.endsWith('.fetel') ? rawUname : `${rawUname}.fetel`;
         const authEmail = `${username}@chidoan.fetel`;
@@ -572,9 +591,9 @@ export default function AdminScreen() {
           email: '',
           authEmail: authEmail,
           username: username,
-          name: newName.trim() || `Chi đoàn ${newBranch}`,
+          name: newName.trim() || `Chi đoàn ${targetBranch}`,
           role: 'chidoan',
-          branch: newBranch.trim(),
+          branch: targetBranch,
           createdAt: Date.now()
         });
         alert(`Tạo tài khoản Chi đoàn thành công!\nTên đăng nhập: ${username}\nMật khẩu: Abc@123`);
@@ -1344,7 +1363,7 @@ export default function AdminScreen() {
                        type="submit" disabled={creatingAccount}
                        className="w-full bg-[#1d4ed8] text-white font-bold text-xs py-2.5 rounded-lg hover:bg-blue-800 disabled:opacity-70"
                      >
-                       {creatingAccount ? 'ĐANG TẠO...' : 'TẠO TÀI KHOẢN (MẬT KHẨU: 123123)'}
+                       {creatingAccount ? 'ĐANG TẠO...' : 'TẠO TÀI KHOẢN (MẬT KHẨU: Abc@123)'}
                      </button>
                   </form>
                 </div>
@@ -1353,7 +1372,7 @@ export default function AdminScreen() {
                   <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
                     <Upload size={16} className="mr-1.5 text-blue-600"/> Import Hàng Loạt (CSV)
                   </h3>
-                  <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và dùng đúng định dạng để tạo nhiều tài khoản cùng lúc. Mật khẩu mặc định: <b>123123</b>.</p>
+                  <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và dùng đúng định dạng để tạo nhiều tài khoản cùng lúc. Mật khẩu mặc định: <b>Abc@123</b>.</p>
                   
                   <div className="flex gap-2">
                      <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1">
