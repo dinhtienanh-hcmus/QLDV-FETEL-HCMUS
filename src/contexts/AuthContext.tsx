@@ -48,24 +48,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userEmailLower = firebaseUser.email?.toLowerCase() || '';
           const isDefaultAdmin = adminEmails.includes(userEmailLower);
           
+          const isBranchAccount = 
+            userEmailLower.endsWith('@chidoan.fetel') || 
+            userEmailLower.includes('chidoan') ||
+            userEmailLower.endsWith('.fetel');
+
+          const getBranchFromEmail = (email: string) => {
+            if (!email) return 'Chi đoàn';
+            const prefix = email.split('@')[0].toLowerCase();
+            let clean = prefix.replace('.fetel', '').replace('chidoan', '').replace(/^[._-]+|[._-]+$/g, '');
+            if (!clean) return 'Chi đoàn';
+            return clean.toUpperCase();
+          };
+
+          const extractedBranch = isBranchAccount ? getBranchFromEmail(userEmailLower) : '';
+          
           let appUser: AppUser = firebaseUser;
           
           if (userDocSnap.exists()) {
             const data = userDocSnap.data();
-            const role = isDefaultAdmin ? 'admin' : (data.role || 'doanvien');
+            let role: 'admin' | 'chidoan' | 'doanvien' = 'doanvien';
+            if (isDefaultAdmin) {
+              role = 'admin';
+            } else if (isBranchAccount || data.role === 'chidoan') {
+              role = 'chidoan';
+            } else {
+              role = data.role || 'doanvien';
+            }
             
             const defaultName = isDefaultAdmin 
               ? (data.name && data.name !== 'Admin ĐTVT' ? data.name : 'BCH Đoàn khoa ĐTVT')
+              : isBranchAccount
+              ? (data.name && data.name !== 'Đoàn viên' ? data.name : `BCH Chi đoàn ${extractedBranch || data.branch || ''}`)
               : (data.name || firebaseUser.displayName || 'Đoàn viên');
-            const defaultCommitteeRole = data.committeeRole || '';
+            
+            const defaultCommitteeRole = data.committeeRole || (isBranchAccount ? 'Chi đoàn' : '');
             const defaultBranchRole = data.branchRole || '';
-            const defaultBranch = data.branch || 'Đoàn khoa ĐTVT';
+            const defaultBranch = isBranchAccount 
+              ? (extractedBranch || data.branch || 'Chi đoàn')
+              : (data.branch || 'Đoàn khoa ĐTVT');
 
             appUser = {
               ...firebaseUser,
               role,
               branch: defaultBranch,
-              mssv: data.mssv,
+              mssv: isBranchAccount ? '' : data.mssv,
               name: defaultName,
               committeeRole: defaultCommitteeRole,
               branchRole: defaultBranchRole,
@@ -73,12 +100,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               avatar: data.avatar || firebaseUser.photoURL || undefined,
             };
 
-            // Sync database profile if needed for default admin account
-            if (isDefaultAdmin && data.role !== 'admin') {
+            // Sync database profile if needed for admin or branch account
+            if ((isDefaultAdmin && data.role !== 'admin') || (isBranchAccount && (data.role !== 'chidoan' || data.branch !== defaultBranch))) {
               await setDoc(userDocRef, {
                 email: firebaseUser.email || userEmailLower,
-                name: 'BCH Đoàn khoa ĐTVT',
-                role: 'admin',
+                name: defaultName,
+                role: isDefaultAdmin ? 'admin' : 'chidoan',
                 branch: defaultBranch,
                 updatedAt: Date.now()
               }, { merge: true });
@@ -105,18 +132,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             }
 
+            let defaultRole: 'admin' | 'chidoan' | 'doanvien' = 'doanvien';
+            if (isDefaultAdmin) defaultRole = 'admin';
+            else if (isBranchAccount) defaultRole = 'chidoan';
+
+            const defaultBranchName = isBranchAccount 
+              ? (extractedBranch || matchedProfile?.branch || 'Chi đoàn')
+              : (matchedProfile?.branch || 'Đoàn khoa ĐTVT');
+
             const defaultName = isDefaultAdmin 
               ? 'BCH Đoàn khoa ĐTVT' 
+              : isBranchAccount
+              ? `BCH Chi đoàn ${defaultBranchName}`
               : (matchedProfile?.name || firebaseUser.displayName || userEmailLower.split('@')[0] || 'Đoàn viên');
-            const defaultCommitteeRole = matchedProfile?.committeeRole || '';
-            const defaultBranch = matchedProfile?.branch || 'Đoàn khoa ĐTVT';
+
+            const defaultCommitteeRole = isBranchAccount ? 'Chi đoàn' : (matchedProfile?.committeeRole || '');
 
             const newUserData = {
               email: firebaseUser.email || '',
               name: defaultName,
-              mssv: matchedProfile?.mssv || mssvFromEmail || '',
-              role: isDefaultAdmin ? 'admin' : 'doanvien',
-              branch: defaultBranch,
+              mssv: isBranchAccount ? '' : (matchedProfile?.mssv || mssvFromEmail || ''),
+              role: defaultRole,
+              branch: defaultBranchName,
               committeeRole: defaultCommitteeRole,
               committeeTerm: matchedProfile?.committeeTerm || '',
               avatar: firebaseUser.photoURL || '',
@@ -127,7 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               await setDoc(userDocRef, newUserData);
               appUser = {
                 ...firebaseUser,
-                role: isDefaultAdmin ? 'admin' : 'doanvien',
+                role: defaultRole,
                 name: newUserData.name,
                 branch: newUserData.branch,
                 mssv: newUserData.mssv,

@@ -44,9 +44,12 @@ export default function OnboardingModal() {
     currentUser.role === 'admin' || 
     currentUser.role === 'chidoan' || 
     userEmail === 'dkdtvt.hcmus@gmail.com' || 
-    userEmail.startsWith('chidoan') ||
-    userEmail.startsWith('cd') ||
-    userEmail.includes('admin');
+    userEmail.endsWith('@chidoan.fetel') ||
+    userEmail.includes('chidoan') ||
+    userEmail.includes('admin') ||
+    userEmail.endsWith('.fetel') ||
+    userEmail.includes('.fetel@') ||
+    userEmail.startsWith('cd');
 
   if (isAdminOrBch) return null;
   if (currentUser.mssv && currentUser.branch && currentUser.name) return null;
