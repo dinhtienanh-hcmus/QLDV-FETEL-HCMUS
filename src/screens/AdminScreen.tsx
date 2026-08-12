@@ -68,12 +68,15 @@ export default function AdminScreen() {
   const isBranch = currentUser?.role === 'chidoan';
 
   const isUserInMyBranch = (u: any) => {
-    if (isAdmin) return true;
+    if (isAdmin) {
+      return u.role === 'chidoan' || u.role === 'admin';
+    }
     if (isBranch) {
       const myBranch = (currentUser?.branch || '').trim().toLowerCase();
       if (!myBranch) return false;
       const uBranch = (u.branch || '').trim().toLowerCase();
-      return uBranch === myBranch || uBranch.includes(myBranch) || myBranch.includes(uBranch);
+      const isSameBranch = uBranch === myBranch || uBranch.includes(myBranch) || myBranch.includes(uBranch);
+      return isSameBranch && u.role === 'doanvien';
     }
     return false;
   };
@@ -585,11 +588,14 @@ export default function AdminScreen() {
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin || !newUsername) return;
+    if ((!isAdmin && !isBranch) || !newUsername) return;
     
     setCreatingAccount(true);
     try {
-      if (newRole === 'doanvien') {
+      const activeRole = isAdmin ? newRole : 'doanvien';
+      const activeBranch = isAdmin ? newBranch.trim() : (currentUser?.branch || '').trim();
+
+      if (activeRole === 'doanvien') {
         const cleanUname = newUsername.trim();
         const docRef = doc(db, 'users', `profile_${cleanUname.toLowerCase()}`);
         await setDoc(docRef, {
@@ -598,12 +604,12 @@ export default function AdminScreen() {
           email: `${cleanUname}@student.hcmus.edu.vn`,
           name: newName.trim(),
           role: 'doanvien',
-          branch: newBranch.trim(),
+          branch: activeBranch,
           createdAt: Date.now()
         }, { merge: true });
         alert(`Đã tạo hồ sơ Đoàn viên cho ${newName} (${cleanUname}).\nĐoàn viên sẽ tự đăng nhập bằng Google!`);
-      } else if (newRole === 'chidoan') {
-        const targetBranch = newBranch.trim();
+      } else if (isAdmin && activeRole === 'chidoan') {
+        const targetBranch = activeBranch;
         if (!targetBranch) {
           alert('Vui lòng chọn hoặc nhập tên Chi đoàn!');
           setCreatingAccount(false);
@@ -641,7 +647,7 @@ export default function AdminScreen() {
           createdAt: Date.now()
         });
         alert(`Tạo tài khoản Chi đoàn thành công!\nTên đăng nhập: ${username}\nMật khẩu: Abc@123`);
-      } else {
+      } else if (isAdmin && activeRole === 'admin') {
         const rawUname = newUsername.trim().toLowerCase();
         const authEmail = rawUname.includes('@') ? rawUname : `${rawUname}@chidoan.fetel`;
         const secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstance");
@@ -654,7 +660,7 @@ export default function AdminScreen() {
           username: rawUname,
           name: newName.trim() || 'Admin',
           role: 'admin',
-          branch: newBranch.trim() || 'Đoàn khoa ĐTVT',
+          branch: activeBranch || 'Đoàn khoa ĐTVT',
           createdAt: Date.now()
         });
         alert(`Tạo tài khoản Admin thành công!\nTên đăng nhập: ${rawUname}\nMật khẩu: Abc@123`);
@@ -721,12 +727,17 @@ export default function AdminScreen() {
   };
 
   const downloadAccountTemplate = () => {
-    const csvContent = "kiem_tra,Tên đăng nhập / MSSV,Họ và tên,Vai trò,Tên đơn vị\n,21120000,Nguyễn Văn A,doanvien,Chi đoàn 21KTPM\n,chidoan1,Bí thư chi đoàn 1,chidoan,Chi đoàn 1\n";
+    let csvContent = "";
+    if (isBranch) {
+      csvContent = `kiem_tra,Tên đăng nhập / MSSV,Họ và tên,Vai trò,Tên đơn vị\n,25120001,Nguyễn Văn A,doanvien,${currentUser?.branch || ''}\n,25120002,Trần Thị B,doanvien,${currentUser?.branch || ''}\n`;
+    } else {
+      csvContent = "kiem_tra,Tên đăng nhập / MSSV,Họ và tên,Vai trò,Tên đơn vị\n,21120000,Nguyễn Văn A,doanvien,Chi đoàn 21KTPM\n,chidoan1,Bí thư chi đoàn 1,chidoan,Chi đoàn 1\n";
+    }
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", "Mau_Danh_Sach_Tai_Khoan.csv");
+    link.setAttribute("download", isBranch ? `Mau_Danh_Sach_Doan_Vien_${currentUser?.branch || ''}.csv` : "Mau_Danh_Sach_Tai_Khoan.csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -734,7 +745,7 @@ export default function AdminScreen() {
 
   const handleBulkImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !isAdmin) return;
+    if (!file || (!isAdmin && !isBranch)) return;
     
     setCreatingAccount(true);
     Papa.parse(file, {
@@ -753,8 +764,8 @@ export default function AdminScreen() {
              if (!usernameStr) continue;
 
              const newNameStr = row['Họ và tên']?.toString().trim() || 'No Name';
-             const newRoleStr = row['Vai trò']?.toString().trim() || 'doanvien';
-             const newBranchStr = row['Tên đơn vị']?.toString().trim() || '';
+             const newRoleStr = isAdmin ? (row['Vai trò']?.toString().trim() || 'doanvien') : 'doanvien';
+             const newBranchStr = isAdmin ? (row['Tên đơn vị']?.toString().trim() || '') : (currentUser?.branch || '');
 
              if (newRoleStr === 'doanvien') {
                const docRef = doc(db, 'users', `profile_${usernameStr.toLowerCase()}`);
@@ -768,7 +779,7 @@ export default function AdminScreen() {
                  createdAt: Date.now()
                }, { merge: true });
                count++;
-             } else if (newRoleStr === 'chidoan') {
+             } else if (isAdmin && newRoleStr === 'chidoan') {
                const rawU = usernameStr.toLowerCase();
                const uname = rawU.endsWith('.fetel') ? rawU : `${rawU}.fetel`;
                const authEmail = `${uname}@chidoan.fetel`;
@@ -1459,62 +1470,65 @@ export default function AdminScreen() {
               </div>
             )}
 
-            {isAdmin && (
+            {(isAdmin || isBranch) && (
               <>
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                   <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-                    <Users size={16} className="mr-1.5 text-blue-600"/> Tạo tài khoản mới
+                    <Users size={16} className="mr-1.5 text-blue-600"/> {isBranch ? 'Thêm Đoàn viên mới' : 'Tạo tài khoản mới'}
                   </h3>
                   <form onSubmit={handleCreateAccount} className="space-y-3">
                      <input 
-                       type="text" placeholder="MSSV / Tên đăng nhập" 
+                       type="text" placeholder={isBranch ? "MSSV (Tên đăng nhập)" : "MSSV / Tên đăng nhập"} 
                        className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
                        value={newUsername} onChange={e => setNewUsername(e.target.value)} required 
                      />
                      <input 
-                       type="text" placeholder="Họ và tên / Tên hiển thị" 
+                       type="text" placeholder="Họ và tên" 
                        className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
                        value={newName} onChange={e => setNewName(e.target.value)} required 
                      />
-                     <select 
-                       className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
-                       value={newRole} onChange={e => setNewRole(e.target.value)}
-                     >
-                        <option value="chidoan">Bí thư / Quản lý Chi đoàn</option>
-                        <option value="doanvien">Đoàn viên</option>
-                        <option value="admin">Quản trị viên (Admin)</option>
-                     </select>
-                     <input 
-                       type="text" 
-                       list="branch-options"
-                       placeholder="Tên đơn vị (Chọn hoặc nhập tên Chi đoàn / Đoàn khoa...)" 
-                       className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
-                       value={newBranch} 
-                       onChange={e => setNewBranch(e.target.value)}
-                     />
-                     <datalist id="branch-options">
-                       <option value="Đoàn khoa ĐTVT" />
-                       {branches.map(b => (
-                         <option key={b.id} value={b.name} />
-                       ))}
-                     </datalist>
+                     {isAdmin && (
+                       <>
+                         <select 
+                           className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
+                           value={newRole} onChange={e => setNewRole(e.target.value)}
+                         >
+                            <option value="chidoan">Bí thư / Quản lý Chi đoàn</option>
+                            <option value="admin">Quản trị viên (Admin)</option>
+                         </select>
+                         <input 
+                           type="text" 
+                           list="branch-options"
+                           placeholder="Tên đơn vị (Chọn hoặc nhập tên Chi đoàn / Đoàn khoa...)" 
+                           className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
+                           value={newBranch} 
+                           onChange={e => setNewBranch(e.target.value)}
+                         />
+                         <datalist id="branch-options">
+                           <option value="Đoàn khoa ĐTVT" />
+                           {branches.map(b => (
+                             <option key={b.id} value={b.name} />
+                           ))}
+                         </datalist>
+                       </>
+                     )}
                      <button 
                        type="submit" disabled={creatingAccount}
-                       className="w-full bg-[#1d4ed8] text-white font-bold text-xs py-2.5 rounded-lg hover:bg-blue-800 disabled:opacity-70"
+                       className="w-full bg-[#1d4ed8] text-white font-bold text-xs py-2.5 rounded-lg hover:bg-blue-800 disabled:opacity-70 cursor-pointer"
                      >
-                       {creatingAccount ? 'ĐANG TẠO...' : 'TẠO TÀI KHOẢN (MẬT KHẨU: Abc@123)'}
+                       {creatingAccount ? 'ĐANG TẠO...' : isBranch ? 'THÊM ĐOÀN VIÊN' : 'TẠO TÀI KHOẢN (MẬT KHẨU: Abc@123)'}
                      </button>
                   </form>
                 </div>
 
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                   <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-                    <Upload size={16} className="mr-1.5 text-blue-600"/> Import Hàng Loạt (CSV)
+                    <Upload size={16} className="mr-1.5 text-blue-600"/> Import {isBranch ? 'Đoàn viên' : 'Hàng Loạt'} (CSV)
                   </h3>
-                  <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và dùng đúng định dạng để tạo nhiều tài khoản cùng lúc. Mật khẩu mặc định: <b>Abc@123</b>.</p>
+                  <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và dùng đúng định dạng để thêm nhanh đoàn viên vào hệ thống. Mật khẩu mặc định: <b>Abc@123</b>.</p>
                   
                   <div className="flex gap-2">
-                     <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1">
+                     <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1 cursor-pointer">
                        <FileSpreadsheet size={14} className="mr-1.5" /> Tải mẫu CSV
                      </button>
                      <label className="text-[10px] text-blue-600 font-bold flex items-center border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg cursor-pointer justify-center flex-1">
