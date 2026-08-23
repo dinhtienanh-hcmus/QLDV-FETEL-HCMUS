@@ -3,7 +3,7 @@ import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, up
 import { db, firebaseConfig } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
 import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY } from '../utils/termUtils';
@@ -680,7 +680,12 @@ export default function AdminScreen() {
         const username = rawUname.endsWith('.fetel') ? rawUname : `${rawUname}.fetel`;
         const authEmail = `${username}@chidoan.fetel`;
         
-        const secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstance");
+        let secondaryApp;
+        try {
+          secondaryApp = getApp("SecondaryAppInstance");
+        } catch {
+          secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstance");
+        }
         const secondaryAuth = getAuth(secondaryApp);
         const userCred = await createUserWithEmailAndPassword(secondaryAuth, authEmail, "Abc@123");
         await signOut(secondaryAuth);
@@ -804,16 +809,35 @@ export default function AdminScreen() {
         let count = 0;
         
         try {
-           const secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstanceBulk");
+           let secondaryApp;
+           try {
+             secondaryApp = getApp("SecondaryAppInstanceBulk");
+           } catch {
+             secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstanceBulk");
+           }
            const secondaryAuth = getAuth(secondaryApp);
 
            for (const row of rows) {
-             let usernameStr = (row['MSSV'] || row['Tên đăng nhập / MSSV'])?.toString().trim();
-             if (!usernameStr) continue;
+              // Normalize keys to find matchings safely (handles BOM, spaces, casing)
+              const cleanRow = {};
+              Object.keys(row).forEach(k => {
+                const cleanKey = k.replace(/^\uFEFF/, '').trim().toLowerCase();
+                cleanRow[cleanKey] = row[k];
+              });
 
-             const newNameStr = (row['Họ tên'] || row['Họ và tên'])?.toString().trim() || 'No Name';
-             const newRoleStr = isAdmin ? (row['Vai trò']?.toString().trim() || 'doanvien') : 'doanvien';
-             const newBranchStr = isAdmin ? (row['Lớp'] || row['Tên đơn vị'])?.toString().trim() || '' : (currentUser?.branch || '');
+              const getVal = (keywords) => {
+                const foundKey = Object.keys(cleanRow).find(k => 
+                  keywords.some(kw => k.includes(kw))
+                );
+                return foundKey ? cleanRow[foundKey]?.toString().trim() : '';
+              };
+
+              let usernameStr = getVal(['mssv', 'tên đăng nhập', 'ten dang nhap', 'username']);
+              if (!usernameStr) continue;
+
+              const newNameStr = getVal(['họ tên', 'ho ten', 'họ và tên', 'ho va ten', 'name']) || 'No Name';
+              const newRoleStr = isAdmin ? (getVal(['vai trò', 'vai tro', 'role']) || 'doanvien') : 'doanvien';
+              const newBranchStr = isAdmin ? (getVal(['lớp', 'lop', 'đơn vị', 'don vi', 'branch']) || '') : (currentUser?.branch || '');
 
               if (newRoleStr === 'doanvien') {
                 let targetDocId = 'profile_' + usernameStr.toLowerCase();
