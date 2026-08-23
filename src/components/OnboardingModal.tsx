@@ -1,41 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { User, CreditCard, Users, CheckCircle2, AlertCircle } from 'lucide-react';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { CreditCard, CheckCircle2, AlertCircle, Search, RefreshCw, User, Users } from 'lucide-react';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
-const DEFAULT_BRANCHES = [
-  '25ICD1', '25DTV1', '25DTV2', '25DTV_DKD',
-  '26ICD1', '26DTV1', '26DTV2', '26DTV_DKD'
-];
+interface FoundProfile {
+  name: string;
+  mssv: string;
+  branch: string;
+}
 
 export default function OnboardingModal() {
   const { currentUser, updateUserProfile } = useAuth();
   
-  const [name, setName] = useState(currentUser?.name || currentUser?.displayName || '');
-  const [mssv, setMssv] = useState(currentUser?.mssv || '');
-  const [branch, setBranch] = useState(currentUser?.branch || '');
-  const [branchesList, setBranchesList] = useState<string[]>(DEFAULT_BRANCHES);
+  const [mssv, setMssv] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [foundProfile, setFoundProfile] = useState<FoundProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    const fetchBranches = async () => {
-      try {
-        const q = query(collection(db, 'branches'), orderBy('name', 'asc'));
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map(doc => doc.data().name || doc.id).filter(Boolean);
-          // Merge with defaults to ensure no loss
-          const merged = Array.from(new Set([...list, ...DEFAULT_BRANCHES]));
-          setBranchesList(merged);
-        }
-      } catch (err) {
-        console.error('Error fetching branches:', err);
-      }
-    };
-    fetchBranches();
-  }, []);
 
   // If user is admin/chidoan or collective account or already completed info, don't show modal
   if (!currentUser) return null;
@@ -54,30 +36,80 @@ export default function OnboardingModal() {
   if (isAdminOrBch) return null;
   if (currentUser.mssv && currentUser.branch && currentUser.name) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSearchProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-
-    if (!name.trim()) {
-      return setError('Vui lòng nhập Họ và tên');
-    }
-    if (!mssv.trim()) {
+    const searchMssv = mssv.trim().toLowerCase();
+    if (!searchMssv) {
       return setError('Vui lòng nhập Mã số sinh viên (MSSV)');
     }
-    if (!branch.trim()) {
-      return setError('Vui lòng chọn Chi đoàn');
-    }
 
+    setSearching(true);
+    setError('');
+    setFoundProfile(null);
+
+    try {
+      // 1. Try to fetch direct document `profile_${mssv}` (format used by CSV Bulk Import)
+      const docRef = doc(db, 'users', `profile_${searchMssv}`);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        setFoundProfile({
+          name: d.name || 'Không rõ họ tên',
+          branch: d.branch || 'Chưa phân chi đoàn',
+          mssv: d.mssv || mssv.trim()
+        });
+        return;
+      }
+
+      // 2. Query users collection where mssv field matches
+      const q = query(collection(db, 'users'), where('mssv', '==', mssv.trim()));
+      const querySnap = await getDocs(q);
+      if (!querySnap.empty) {
+        const d = querySnap.docs[0].data();
+        setFoundProfile({
+          name: d.name || 'Không rõ họ tên',
+          branch: d.branch || 'Chưa phân chi đoàn',
+          mssv: d.mssv || mssv.trim()
+        });
+        return;
+      }
+
+      // 3. Query users collection where username matches
+      const q2 = query(collection(db, 'users'), where('username', '==', mssv.trim()));
+      const querySnap2 = await getDocs(q2);
+      if (!querySnap2.empty) {
+        const d = querySnap2.docs[0].data();
+        setFoundProfile({
+          name: d.name || 'Không rõ họ tên',
+          branch: d.branch || 'Chưa phân chi đoàn',
+          mssv: d.mssv || mssv.trim()
+        });
+        return;
+      }
+
+      setError('Không tìm thấy MSSV này trong danh sách đã được import. Vui lòng kiểm tra lại hoặc liên hệ Chi đoàn / Đoàn khoa để được hỗ trợ.');
+    } catch (err: any) {
+      console.error('Error finding profile:', err);
+      setError('Đã xảy ra lỗi khi tìm kiếm thông tin. Vui lòng thử lại.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleConfirmProfile = async () => {
+    if (!foundProfile) return;
     setSaving(true);
+    setError('');
     try {
       await updateUserProfile({
-        name: name.trim(),
-        mssv: mssv.trim(),
-        branch: branch.trim(),
+        name: foundProfile.name,
+        mssv: foundProfile.mssv,
+        branch: foundProfile.branch,
       });
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Cập nhật thông tin thất bại. Vui lòng thử lại.');
+      console.error('Error linking profile:', err);
+      setError(err.message || 'Liên kết tài khoản thất bại. Vui lòng thử lại.');
     } finally {
       setSaving(false);
     }
@@ -90,9 +122,9 @@ export default function OnboardingModal() {
           <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
             <CheckCircle2 size={24} />
           </div>
-          <h2 className="text-lg font-bold text-slate-800">Cập nhật thông tin Đoàn viên</h2>
+          <h2 className="text-lg font-bold text-slate-800">Liên kết tài khoản Đoàn viên</h2>
           <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-            Để liên kết với dữ liệu điểm danh và thông tin cá nhân trên hệ thống, vui lòng bổ sung đầy đủ thông tin bên dưới.
+            Ở lần đăng nhập đầu tiên, vui lòng nhập MSSV để hệ thống tự động đối chiếu, điền Họ tên và Chi đoàn trực thuộc từ danh sách lớp.
           </p>
         </div>
 
@@ -103,75 +135,100 @@ export default function OnboardingModal() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase ml-1">
-              Họ và tên Đoàn viên
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                <User size={16} />
+        {!foundProfile ? (
+          <form onSubmit={handleSearchProfile} className="space-y-4">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase ml-1">
+                Mã số sinh viên (MSSV) của bạn
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                  <CreditCard size={16} />
+                </div>
+                <input
+                  type="text"
+                  required
+                  disabled={searching}
+                  value={mssv}
+                  onChange={(e) => setMssv(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-bold"
+                  placeholder="Ví dụ: 22120001"
+                />
               </div>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
-                placeholder="Nguyễn Văn A"
-              />
             </div>
-          </div>
 
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase ml-1">
-              Mã số sinh viên (MSSV)
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                <CreditCard size={16} />
+            <button
+              type="submit"
+              disabled={searching}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold uppercase tracking-wide text-xs drop-shadow-md transition active:scale-[0.98] disabled:opacity-70 mt-2 cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              {searching ? (
+                <>
+                  <RefreshCw size={14} className="animate-spin" />
+                  Đang tìm kiếm hồ sơ...
+                </>
+              ) : (
+                <>
+                  <Search size={14} />
+                  Tìm kiếm thông tin
+                </>
+              )}
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-5">
+            <div className="bg-gradient-to-r from-emerald-50/50 to-teal-50/50 border border-emerald-200 p-4 rounded-2xl">
+              <span className="text-[10px] font-extrabold text-emerald-800 uppercase tracking-wider block mb-2">
+                ✨ Đã tìm thấy thông tin phù hợp:
+              </span>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <User size={14} className="text-emerald-600 shrink-0" />
+                  <span className="text-slate-500 font-medium">Họ tên:</span>
+                  <span className="font-bold text-slate-800">{foundProfile.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <CreditCard size={14} className="text-emerald-600 shrink-0" />
+                  <span className="text-slate-500 font-medium">MSSV:</span>
+                  <span className="font-extrabold text-slate-800">{foundProfile.mssv}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Users size={14} className="text-emerald-600 shrink-0" />
+                  <span className="text-slate-500 font-medium">Chi đoàn:</span>
+                  <span className="font-extrabold text-blue-800 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">{foundProfile.branch}</span>
+                </div>
               </div>
-              <input
-                type="text"
-                required
-                value={mssv}
-                onChange={(e) => setMssv(e.target.value)}
-                className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
-                placeholder="Ví dụ: 22120001"
-              />
             </div>
-          </div>
 
-          <div>
-            <label className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase ml-1">
-              Chi đoàn trực thuộc
-            </label>
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                <Users size={16} />
-              </div>
-              <select
-                required
-                value={branch}
-                onChange={(e) => setBranch(e.target.value)}
-                className="w-full pl-10 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-medium appearance-none cursor-pointer"
+            <div className="space-y-2">
+              <button
+                onClick={handleConfirmProfile}
+                disabled={saving}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold uppercase tracking-wide text-xs drop-shadow-md transition active:scale-[0.98] disabled:opacity-70 cursor-pointer flex items-center justify-center gap-1.5"
               >
-                <option value="">-- Chọn Chi đoàn --</option>
-                {branchesList.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
+                {saving ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    Đang liên kết tài khoản...
+                  </>
+                ) : (
+                  'Xác nhận & Hoàn tất liên kết'
+                )}
+              </button>
+              
+              <button
+                onClick={() => {
+                  setFoundProfile(null);
+                  setError('');
+                }}
+                disabled={saving}
+                className="w-full text-slate-500 hover:text-slate-800 hover:bg-slate-50 py-2 rounded-xl text-center font-bold text-xs transition cursor-pointer"
+              >
+                Nhập lại MSSV khác
+              </button>
             </div>
           </div>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold uppercase tracking-wide text-xs drop-shadow-md transition active:scale-[0.98] disabled:opacity-70 mt-2 cursor-pointer"
-          >
-            {saving ? 'Đang lưu...' : 'Hoàn tất & Liên kết tài khoản'}
-          </button>
-        </form>
+        )}
       </div>
     </div>
   );

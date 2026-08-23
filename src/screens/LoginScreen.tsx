@@ -300,7 +300,7 @@ export default function LoginScreen() {
               </button>
 
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-[10px] text-slate-500 leading-normal">
-                💡 <strong>Lưu ý:</strong> Ở lần đăng nhập đầu tiên, hệ thống sẽ yêu cầu bạn xác nhận <strong>Họ tên</strong>, <strong>MSSV</strong> và <strong>Chi đoàn</strong> để liên kết chính xác hồ sơ đã import.
+                💡 <strong>Lưu ý:</strong> Ở lần đăng nhập đầu tiên, hệ thống sẽ chỉ yêu cầu bạn nhập <strong>MSSV</strong> để tự động tìm kiếm và liên kết chính xác hồ sơ đã import.
               </div>
             </div>
           ) : (
