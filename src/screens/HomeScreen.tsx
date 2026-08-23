@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { db, auth } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, orderBy, getDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
-import { isTermExpired } from '../utils/termUtils';
+import { isTermExpired, formatDateToDDMMYYYY } from '../utils/termUtils';
 
 interface Organizer {
   mssv: string;
@@ -579,18 +579,18 @@ export default function HomeScreen() {
                       <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 text-xs font-semibold text-slate-700 my-2 bg-slate-50 p-2 rounded-xl border border-slate-100">
                         <div className="flex items-center gap-1">
                           <span className="text-blue-600 font-bold">📅 Bắt đầu:</span>
-                          <span className="font-bold text-slate-800">{new Date(campaign.startTime).toLocaleDateString('vi-VN')}</span>
+                          <span className="font-bold text-slate-800">{formatDateToDDMMYYYY(campaign.startTime)}</span>
                         </div>
                         <span className="hidden sm:inline text-slate-300">•</span>
                         <div className="flex items-center gap-1">
                           <span className="text-red-600 font-bold">🏁 Kết thúc:</span>
-                          <span className="font-bold text-slate-800">{new Date(campaign.endTime).toLocaleDateString('vi-VN')}</span>
+                          <span className="font-bold text-slate-800">{formatDateToDDMMYYYY(campaign.endTime)}</span>
                         </div>
                       </div>
 
-                      {/* Điểm rèn luyện & Mục ĐRL - Prominent Banner */}
+                      {/* Điểm rèn luyện - Prominent Banner */}
                       <div className="mt-2 bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 border border-purple-200/80 p-2.5 rounded-xl shadow-2xs">
-                        <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-xs uppercase font-extrabold text-purple-800 tracking-wider flex items-center gap-1">
                             <span>✨</span> Điểm rèn luyện cộng:
                           </span>
@@ -598,17 +598,13 @@ export default function HomeScreen() {
                             +{campaign.pointsParticipant} ĐRL
                           </span>
                         </div>
-                        <div className="text-xs font-bold text-purple-950 flex items-center gap-1.5">
-                          <span className="text-purple-600 shrink-0">🎯</span>
-                          <span className="line-clamp-1">{campaign.drlCategory || 'Mục 3: Trách nhiệm tham gia các hoạt động chính trị, xã hội, văn hóa, văn nghệ, thể thao, phòng chống tội phạm, tệ nạn xã hội'}</span>
-                        </div>
                       </div>
 
                       {/* Status indicator */}
                       {campaign.attended ? (
                         <div className="mt-2.5 flex items-center justify-center gap-1.5 py-1.5 px-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-700">
                           <CheckCircle2 size={16} />
-                          <span>Đã tham gia điểm danh ({new Date(campaign.scannedAt || Date.now()).toLocaleDateString('vi-VN')})</span>
+                          <span>Đã tham gia điểm danh ({formatDateToDDMMYYYY(campaign.scannedAt || Date.now())})</span>
                         </div>
                       ) : (
                         <div className="mt-2.5 text-center py-1.5 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600">
@@ -655,20 +651,16 @@ export default function HomeScreen() {
                       +{selectedActivity.pointsParticipant} ĐRL
                     </span>
                   </div>
-                  <div className="text-xs font-bold text-purple-950 border-t border-purple-200/60 pt-2 flex items-center gap-1.5">
-                    <span className="shrink-0">🎯 Mục / Tiêu chí:</span>
-                    <span>{selectedActivity.drlCategory || 'Mục 3: Trách nhiệm tham gia các hoạt động chính trị, xã hội, văn hóa, văn nghệ, thể thao, phòng chống tội phạm, tệ nạn xã hội'}</span>
-                  </div>
                 </div>
 
                 <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-100 space-y-2 text-sm font-medium text-slate-800">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 text-xs font-bold uppercase">📅 Thời gian bắt đầu:</span>
-                    <span className="font-bold text-blue-900">{new Date(selectedActivity.startTime).toLocaleDateString('vi-VN')}</span>
+                    <span className="font-bold text-blue-900">{formatDateToDDMMYYYY(selectedActivity.startTime)}</span>
                   </div>
                   <div className="flex items-center justify-between border-t border-blue-100/70 pt-2">
                     <span className="text-slate-500 text-xs font-bold uppercase">🏁 Thời gian kết thúc:</span>
-                    <span className="font-bold text-red-700">{new Date(selectedActivity.endTime).toLocaleDateString('vi-VN')}</span>
+                    <span className="font-bold text-red-700">{formatDateToDDMMYYYY(selectedActivity.endTime)}</span>
                   </div>
                 </div>
 

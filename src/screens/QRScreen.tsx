@@ -20,6 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { collection, query, getDocs, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Html5Qrcode } from 'html5-qrcode';
+import { formatDateToDDMMYYYY } from '../utils/termUtils';
 
 interface UserActivity {
   id: string;
@@ -114,7 +115,7 @@ export default function QRScreen() {
               id: actDoc.id,
               name: actData.name,
               time: actData.startTime 
-                ? new Date(actData.startTime).toLocaleDateString('vi-VN') 
+                ? formatDateToDDMMYYYY(actData.startTime) 
                 : 'N/A',
               status: 'attended',
             });

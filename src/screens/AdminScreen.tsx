@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { db, firebaseConfig } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
-import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS } from '../utils/termUtils';
+import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY } from '../utils/termUtils';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 
 interface Organizer {
@@ -95,6 +95,9 @@ export default function AdminScreen() {
   const [deletingBranch, setDeletingBranch] = useState<{ id: string; name: string } | null>(null);
   const [deletingUser, setDeletingUser] = useState<any | null>(null);
   const [branchesSeeded, setBranchesSeeded] = useState(false);
+  const [myDriveLink, setMyDriveLink] = useState('');
+  const [savingDriveLink, setSavingDriveLink] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const DEFAULT_BRANCHES = [
     '25ICD1', '25DTV1', '25DTV2', '25DTV_DKD',
@@ -150,11 +153,13 @@ export default function AdminScreen() {
     fetchActivities();
     fetchUsers();
     fetchBchTerms();
-    if (isAdmin) {
-      fetchHandbookTopics();
+    if (isAdmin || isBranch) {
       fetchBranches();
     }
-  }, [currentUser, isAdmin]);
+    if (isAdmin) {
+      fetchHandbookTopics();
+    }
+  }, [currentUser, isAdmin, isBranch]);
 
   const fetchBchTerms = async () => {
     try {
@@ -314,6 +319,48 @@ export default function AdminScreen() {
     } catch (err) {
       console.error(err);
       alert('Không thể xóa Chi đoàn.');
+    }
+  };
+
+  useEffect(() => {
+    if (isBranch && branches.length > 0) {
+      const mb = branches.find(b => b.name === currentUser?.branch);
+      if (mb) {
+        setMyDriveLink(mb.activityDriveLink || '');
+      }
+    }
+  }, [branches, isBranch, currentUser]);
+
+  const handleSaveDriveLink = async () => {
+    if (!currentUser?.branch) return;
+    setSavingDriveLink(true);
+    setSaveSuccess(false);
+    try {
+      const mb = branches.find(b => b.name === currentUser.branch);
+      if (mb) {
+        await updateDoc(doc(db, 'branches', mb.id), {
+          activityDriveLink: myDriveLink.trim(),
+          updatedAt: Date.now()
+        });
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+        fetchBranches();
+      } else {
+        // Create branch doc if missing
+        await addDoc(collection(db, 'branches'), {
+          name: currentUser.branch,
+          activityDriveLink: myDriveLink.trim(),
+          createdAt: Date.now()
+        });
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+        fetchBranches();
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Không thể cập nhật link Drive. Vui lòng thử lại.');
+    } finally {
+      setSavingDriveLink(false);
     }
   };
 
@@ -974,6 +1021,38 @@ export default function AdminScreen() {
 
       <div className="flex-1 p-4 space-y-4 overflow-y-auto pb-10">
         
+        {isBranch && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl shadow-sm border border-blue-200">
+            <h3 className="text-sm font-bold text-blue-900 mb-1 flex items-center gap-1.5">
+              📁 Link Drive Tổng Hợp Hoạt Động (Chi đoàn {currentUser?.branch})
+            </h3>
+            <p className="text-[11px] text-slate-600 mb-3">
+              Nhập đường dẫn Google Drive chứa báo cáo và minh chứng tổng hợp hoạt động của Chi đoàn bạn để Đoàn khoa theo dõi và duyệt trực tuyến.
+            </p>
+            <div className="flex gap-2">
+              <input 
+                type="url" 
+                placeholder="https://drive.google.com/drive/folders/..." 
+                className="flex-1 text-xs p-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                value={myDriveLink}
+                onChange={e => setMyDriveLink(e.target.value)}
+              />
+              <button 
+                onClick={handleSaveDriveLink}
+                disabled={savingDriveLink}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 rounded-lg font-bold text-xs shrink-0 cursor-pointer transition disabled:opacity-50"
+              >
+                {savingDriveLink ? 'ĐANG LƯU...' : 'LƯU LINK'}
+              </button>
+            </div>
+            {saveSuccess && (
+              <p className="text-[10px] text-emerald-600 font-bold mt-1.5 flex items-center gap-1">
+                <Check size={12} /> Đã cập nhật link Drive thành công!
+              </p>
+            )}
+          </div>
+        )}
+        
         {activeTab === 'activities' && (
           <>
         {isAdmin && (
@@ -1050,6 +1129,8 @@ export default function AdminScreen() {
               </div>
             </div>
 
+            {/* Temporarily hidden "Mục / Tiêu chí ĐRL" field as requested */}
+            {/*
             <div>
               <label className="text-[10px] font-semibold text-slate-500 uppercase ml-1 block mb-1">Mục / Tiêu chí ĐRL</label>
               <select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg font-medium" value={drlCategory} onChange={e => setDrlCategory(e.target.value)}>
@@ -1058,6 +1139,7 @@ export default function AdminScreen() {
                 <option value="Mục 4: Trách nhiệm công dân trong quan hệ cộng đồng">Mục 4: Trách nhiệm công dân trong quan hệ cộng đồng</option>
               </select>
             </div>
+            */}
 
             {isBranch && (
               <div>
@@ -1222,8 +1304,8 @@ export default function AdminScreen() {
                    <div className="pr-16">
                      <h4 className="text-xs font-bold text-slate-800 mb-1 leading-tight">{act.name}</h4>
                      <p className="text-[9px] text-slate-500 font-semibold mb-0.5">HK{act.semester} - {act.academicYear}</p>
-                     <p className="text-[9px] text-slate-500 mb-0.5">Bắt đầu: {new Date(act.startTime).toLocaleDateString('vi-VN')}</p>
-                     <p className="text-[9px] text-slate-500 mb-1">Kết thúc: {new Date(act.endTime).toLocaleDateString('vi-VN')}</p>
+                     <p className="text-[9px] text-slate-500 mb-0.5">Bắt đầu: {formatDateToDDMMYYYY(act.startTime)}</p>
+                     <p className="text-[9px] text-slate-500 mb-1">Kết thúc: {formatDateToDDMMYYYY(act.endTime)}</p>
                      <div className="flex gap-2 text-[9px] mb-2 font-medium">
                        <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">TG: +{act.pointsParticipant}đ</span>
                        <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">BTC: +{act.pointsOrganizer}đ</span>
@@ -1410,44 +1492,61 @@ export default function AdminScreen() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {branches.map((b) => (
-                  <div key={b.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center">
-                    {editingBranchId === b.id ? (
-                      <div className="flex gap-1 items-center flex-1 mr-2">
-                        <input 
-                          type="text" 
-                          value={editingBranchName} 
-                          onChange={(e) => setEditingBranchName(e.target.value)}
-                          className="w-full text-xs p-1.5 bg-white border border-slate-300 rounded focus:outline-none"
-                        />
-                        <button onClick={() => handleUpdateBranch(b.id)} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition">
-                          <Check size={16} />
-                        </button>
-                        <button onClick={() => { setEditingBranchId(null); setEditingBranchName(''); }} className="p-1.5 text-slate-400 hover:bg-slate-200 rounded-lg transition">
-                          <X size={16} />
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="font-bold text-xs text-slate-800">{b.name}</span>
-                    )}
+                  <div key={b.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col justify-between">
+                    <div className="flex justify-between items-center mb-2">
+                      {editingBranchId === b.id ? (
+                        <div className="flex gap-1 items-center flex-1 mr-2">
+                          <input 
+                            type="text" 
+                            value={editingBranchName} 
+                            onChange={(e) => setEditingBranchName(e.target.value)}
+                            className="w-full text-xs p-1.5 bg-white border border-slate-300 rounded focus:outline-none"
+                          />
+                          <button onClick={() => handleUpdateBranch(b.id)} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition">
+                            <Check size={16} />
+                          </button>
+                          <button onClick={() => { setEditingBranchId(null); setEditingBranchName(''); }} className="p-1.5 text-slate-400 hover:bg-slate-200 rounded-lg transition">
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="font-extrabold text-xs text-slate-800">{b.name}</span>
+                      )}
 
-                    {editingBranchId !== b.id && (
-                      <div className="flex items-center gap-1">
-                        <button 
-                          onClick={() => { setEditingBranchId(b.id); setEditingBranchName(b.name); }}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
-                          title="Chỉnh sửa tên"
+                      {editingBranchId !== b.id && (
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => { setEditingBranchId(b.id); setEditingBranchName(b.name); }}
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                            title="Chỉnh sửa tên"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button 
+                            onClick={() => setDeletingBranch({ id: b.id, name: b.name })}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                            title="Xóa Chi đoàn"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border-t border-slate-200/60 pt-2.5 mt-1.5">
+                      {b.activityDriveLink ? (
+                        <a 
+                          href={b.activityDriveLink} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="text-[10px] font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 hover:text-blue-700 px-2.5 py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition w-full shadow-2xs cursor-pointer"
                         >
-                          <Edit2 size={14} />
-                        </button>
-                        <button 
-                          onClick={() => setDeletingBranch({ id: b.id, name: b.name })}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
-                          title="Xóa Chi đoàn"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    )}
+                          <ExternalLink size={12} /> Xem Drive tổng hợp
+                        </a>
+                      ) : (
+                        <div className="text-[10px] text-slate-400 italic text-center py-1 bg-slate-100/50 rounded-lg">Chưa cập nhật Drive hoạt động</div>
+                      )}
+                    </div>
                   </div>
                 ))}
 
