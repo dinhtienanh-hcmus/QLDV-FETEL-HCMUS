@@ -38,6 +38,7 @@ interface Activity {
   cooperatingBranches?: string[];
   otherCooperators?: string;
   branches?: string[];
+  activityType?: string;
 }
 
 export default function AdminScreen() {
@@ -81,7 +82,11 @@ export default function AdminScreen() {
     return false;
   };
 
-  const [activeTab, setActiveTab] = useState<'activities' | 'users' | 'bch' | 'handbook' | 'branches'>('activities');
+  const [activeTab, setActiveTab] = useState<'activities' | 'users' | 'bch' | 'handbook' | 'branches' | 'tracking'>('activities');
+  const [trackingSemester, setTrackingSemester] = useState<string>('all');
+  const [trackingYear, setTrackingYear] = useState<string>('2026-2027');
+  const [trackingSearch, setTrackingSearch] = useState<string>('');
+  const [activityType, setActivityType] = useState<string>('tructiep');
   const [usersList, setUsersList] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [userSearch, setUserSearch] = useState('');
@@ -557,6 +562,7 @@ export default function AdminScreen() {
         planLink,
         description,
         imageUrl,
+        activityType: activityType || 'tructiep',
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -578,6 +584,7 @@ export default function AdminScreen() {
       setPlanLink('');
       setDescription('');
       setImageUrl('');
+      setActivityType('tructiep');
       setOrganizerDetails([]);
       setIsCooperating(false);
       setCooperatingBranches([]);
@@ -614,6 +621,52 @@ export default function AdminScreen() {
       fetchActivities();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+      
+
+  const handleReject = async (id: string, actName: string, actTarget: string) => {
+    if (!isAdmin) return;
+    if (!window.confirm(`Bạn có chắc muốn từ chối đề xuất hoạt động "${actName}"?`)) return;
+    try {
+      await updateDoc(doc(db, 'activities', id), {
+        status: 'rejected',
+        updatedAt: Date.now()
+      });
+      fetchActivities();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const getActivityTypeLabel = (act: Activity) => {
+    if (act.activityType) {
+      switch (act.activityType) {
+        case 'online': return 'ONLINE';
+        case 'tructiep': return 'TRỰC TIẾP';
+        case 'diachido': return 'ĐỊA CHỈ ĐỎ';
+        case 'chunhatxanh': return 'CHỦ NHẬT XANH';
+        case 'tinhnguyen': return 'TÌNH NGUYỆN';
+        default: return act.activityType.toUpperCase();
+      }
+    }
+    const nameLower = (act.name || '').toLowerCase();
+    if (nameLower.includes('online') || nameLower.includes('trực tuyến') || nameLower.includes('quản lý') || nameLower.includes('webinar') || nameLower.includes('quiz') || nameLower.includes('form')) return 'ONLINE';
+    if (nameLower.includes('chủ nhật xanh') || nameLower.includes('lao động') || nameLower.includes('môi trường') || nameLower.includes('dọn dẹp')) return 'CHỦ NHẬT XANH';
+    if (nameLower.includes('địa chỉ đỏ') || nameLower.includes('về nguồn') || nameLower.includes('di tích') || nameLower.includes('đền') || nameLower.includes('bảo tàng') || nameLower.includes('dấu chân tuổi trẻ')) return 'ĐỊA CHỈ ĐỎ';
+    if (nameLower.includes('tình nguyện') || nameLower.includes('xuân tình nguyện') || nameLower.includes('mùa hè xanh') || nameLower.includes('hiến máu') || nameLower.includes('chiến dịch')) return 'TÌNH NGUYỆN';
+    return 'TRỰC TIẾP';
+  };
+
+  const getActivityTypeColor = (typeLabel: string) => {
+    switch (typeLabel) {
+      case 'ONLINE': return 'bg-blue-600 text-white';
+      case 'TRỰC TIẾP': return 'bg-emerald-700 text-white';
+      case 'ĐỊA CHỈ ĐỎ': return 'bg-red-700 text-white';
+      case 'CHỦ NHẬT XANH': return 'bg-green-600 text-white';
+      case 'TÌNH NGUYỆN': return 'bg-orange-600 text-white';
+      default: return 'bg-slate-600 text-white';
     }
   };
 
@@ -1068,6 +1121,14 @@ export default function AdminScreen() {
                 Sổ tay ĐV
               </button>
             )}
+            {isAdmin && (
+              <button 
+                onClick={() => setActiveTab('tracking')}
+                className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'tracking' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+              >
+                Bảng hoạt động
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1180,6 +1241,21 @@ export default function AdminScreen() {
                 <label className="text-[10px] font-semibold text-slate-500 uppercase ml-1 block">ĐRL Tổ chức</label>
                 <input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={pointsOrganizer} onChange={e => setPointsOrganizer(Number(e.target.value))} min={0} required />
               </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-semibold text-slate-500 uppercase ml-1 block mb-1">Loại hoạt động</label>
+              <select 
+                className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg font-medium focus:outline-none focus:bg-white focus:border-blue-500" 
+                value={activityType} 
+                onChange={e => setActivityType(e.target.value)}
+              >
+                <option value="tructiep">TRỰC TIẾP (Mặc định)</option>
+                <option value="online">ONLINE</option>
+                <option value="diachido">ĐỊA CHỈ ĐỎ</option>
+                <option value="chunhatxanh">CHỦ NHẬT XANH</option>
+                <option value="tinhnguyen">TÌNH NGUYỆN</option>
+              </select>
             </div>
 
             {/* Temporarily hidden "Mục / Tiêu chí ĐRL" field as requested */}
@@ -1972,10 +2048,279 @@ export default function AdminScreen() {
                 {handbookTopics.length === 0 && (
                   <p className="text-xs text-slate-500 italic text-center py-4">Chưa có chủ đề nào.</p>
                 )}
-              </div>
+                          </div>
             </div>
           </>
         )}
+
+        {activeTab === 'tracking' && isAdmin && (
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 animate-fadeIn">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5 pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 flex items-center gap-1.5 uppercase tracking-wide">
+                  📊 Bảng theo dõi & quản lý hoạt động Chi đoàn
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-1 font-medium">
+                  Quản lý trạng thái và timeline tổ chức hoạt động chính thức và dự kiến của các Chi đoàn trực thuộc.
+                </p>
+              </div>
+              
+              {/* Quick stats */}
+              <div className="flex gap-2 text-[11px] font-bold">
+                <span className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200/60 shadow-xs">
+                  🏫 {branches.length} Chi đoàn
+                </span>
+                <span className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-200/60 shadow-xs">
+                  🟢 {activities.filter(a => a.status === 'approved').length} Đã tổ chức
+                </span>
+                <span className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-200/60 shadow-xs">
+                  🔵 {activities.filter(a => a.status === 'pending').length} Dự kiến
+                </span>
+              </div>
+            </div>
+
+            {/* Filter controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5 p-3.5 bg-slate-50/80 rounded-xl border border-slate-100">
+              <div>
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5 ml-0.5">Học kỳ</label>
+                <select 
+                  value={trackingSemester} 
+                  onChange={e => setTrackingSemester(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-bold text-slate-700"
+                >
+                  <option value="all">Tất cả Học kỳ</option>
+                  <option value="1">Học kỳ 1</option>
+                  <option value="2">Học kỳ 2</option>
+                  <option value="3">Học kỳ hè</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5 ml-0.5">Năm học</label>
+                <select 
+                  value={trackingYear} 
+                  onChange={e => setTrackingYear(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-bold text-slate-700"
+                >
+                  <option value="all">Tất cả Năm học</option>
+                  <option value="2025-2026">2025-2026</option>
+                  <option value="2026-2027">2026-2027</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5 ml-0.5">Tìm kiếm Chi đoàn</label>
+                <input 
+                  type="text" 
+                  placeholder="Nhập tên lớp..."
+                  value={trackingSearch}
+                  onChange={e => setTrackingSearch(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 font-medium text-slate-700"
+                />
+              </div>
+            </div>
+
+            {/* Legend / Guide */}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-100 text-[10.5px] font-bold text-slate-600">
+              <span className="uppercase tracking-wider text-[9px] text-slate-400 font-extrabold">Ghi chú màu sắc:</span>
+              <span className="flex items-center gap-1.5 text-emerald-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block shadow-xs"></span>
+                Đang hoạt động (Xanh lá)
+              </span>
+              <span className="flex items-center gap-1.5 text-rose-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shadow-xs"></span>
+                Đã qua ngày thực hiện (Đỏ)
+              </span>
+              <span className="flex items-center gap-1.5 text-blue-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block shadow-xs"></span>
+                Chưa bắt đầu / Đề xuất (Xanh dương)
+              </span>
+            </div>
+
+            {/* Excel Table */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs bg-slate-50/20">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead className="bg-slate-100/90 border-b border-slate-200 text-slate-700 font-extrabold uppercase tracking-wider text-[9.5px]">
+                    <tr>
+                      <th className="p-3 border-r border-slate-200 w-[110px] text-center bg-slate-50" rowSpan={2}>CHI ĐOÀN</th>
+                      <th className="p-3 border-r border-slate-200 w-[150px] text-center bg-slate-50" rowSpan={2}>NGƯỜI PHỤ TRÁCH</th>
+                      <th className="p-3 border-r border-slate-200 text-center bg-emerald-100/50 text-emerald-800" colSpan={3}>HOẠT ĐỘNG ĐÃ/ĐANG TỔ CHỨC</th>
+                      <th className="p-3 text-center bg-indigo-100/50 text-indigo-800" colSpan={3}>HOẠT ĐỘNG DỰ KIẾN TỔ CHỨC</th>
+                    </tr>
+                    <tr>
+                      <th className="p-2.5 border-r border-slate-200 bg-emerald-50/30 text-emerald-900">TÊN HOẠT ĐỘNG</th>
+                      <th className="p-2 border-r border-slate-200 bg-emerald-50/30 text-emerald-900 w-[100px] text-center">BẮT ĐẦU</th>
+                      <th className="p-2 border-r border-slate-200 bg-emerald-50/30 text-emerald-900 w-[100px] text-center">KẾT THÚC</th>
+                      <th className="p-2.5 border-r border-slate-200 bg-indigo-50/30 text-indigo-900">TÊN HOẠT ĐỘNG DỰ KIẾN</th>
+                      <th className="p-2 border-r border-slate-200 bg-indigo-50/30 text-indigo-900 w-[110px] text-center">THỜI GIAN DỰ KIẾN</th>
+                      <th className="p-2 bg-indigo-50/30 text-indigo-900 w-[120px] text-center">PHÂN LOẠI CHỦ ĐỀ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-medium text-slate-700 bg-white">
+                    {(() => {
+                      const now = Date.now();
+                      const sortedBranches = [...branches].sort((a, b) => a.name.localeCompare(b.name));
+                      const filteredBranches = sortedBranches.filter(b => 
+                        b.name.toLowerCase().includes(trackingSearch.trim().toLowerCase())
+                      );
+
+                      if (filteredBranches.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={8} className="p-8 text-center text-slate-400 italic font-medium">
+                              Không tìm thấy Chi đoàn nào phù hợp.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      const getRoleRank = (roleStr = '') => {
+                        const r = roleStr.toLowerCase();
+                        if (r.includes('bí thư') && !r.includes('phó bí')) return 1;
+                        if (r.includes('phó bí')) return 2;
+                        if (r.includes('thường vụ') || r.includes('btv')) return 3;
+                        if (r.includes('chấp hành') || r.includes('bch') || r.includes('ủy viên') || r.includes('uv')) return 4;
+                        return 5;
+                      };
+
+                      return filteredBranches.map(branch => {
+                        // Find branch leader
+                        const cdBch = usersList.filter(u => 
+                          u.branch && 
+                          u.branch.trim().toLowerCase() === branch.name.trim().toLowerCase() && 
+                          u.branchRole && 
+                          u.branchRole.trim() !== ''
+                        );
+                        
+                        let leaderName = 'CHƯA CÓ BCH';
+                        if (cdBch.length > 0) {
+                          cdBch.sort((a, b) => getRoleRank(a.branchRole) - getRoleRank(b.branchRole));
+                          leaderName = cdBch[0].name.toUpperCase();
+                        }
+
+                        // Filter approved acts
+                        const approvedActs = activities.filter(a => {
+                          const belongs = a.branch === branch.name || (a.branches && a.branches.includes(branch.name));
+                          const isApproved = a.status === 'approved';
+                          const semMatch = trackingSemester === 'all' || a.semester === Number(trackingSemester);
+                          const yearMatch = trackingYear === 'all' || a.academicYear === trackingYear;
+                          return belongs && isApproved && semMatch && yearMatch;
+                        });
+
+                        // Filter pending acts
+                        const pendingActs = activities.filter(a => {
+                          const belongs = a.branch === branch.name || (a.branches && a.branches.includes(branch.name));
+                          const isPending = a.status === 'pending';
+                          const semMatch = trackingSemester === 'all' || a.semester === Number(trackingSemester);
+                          const yearMatch = trackingYear === 'all' || a.academicYear === trackingYear;
+                          return belongs && isPending && semMatch && yearMatch;
+                        });
+
+                        const rowCount = Math.max(approvedActs.length, pendingActs.length, 1);
+                        const rows = [];
+
+                        for (let i = 0; i < rowCount; i++) {
+                          const appAct = approvedActs[i];
+                          const penAct = pendingActs[i];
+
+                          const startStr = appAct ? formatDateToDDMMYYYY(appAct.startTime) : '';
+                          const endStr = appAct ? formatDateToDDMMYYYY(appAct.endTime) : '';
+                          const pendTimeStr = penAct ? `${formatDateToDDMMYYYY(penAct.startTime)}${penAct.endTime !== penAct.startTime ? ' - ' + formatDateToDDMMYYYY(penAct.endTime) : ''}` : '';
+
+                          const penType = penAct ? getActivityTypeLabel(penAct) : '';
+                          const penColor = penAct ? getActivityTypeColor(penType) : '';
+
+                          let appStatusClass = '';
+                          if (appAct) {
+                            if (now > appAct.endTime) {
+                              appStatusClass = 'bg-rose-500 text-white font-semibold rounded px-2 py-1 text-center shadow-xs block text-[10px] uppercase tracking-wide';
+                            } else if (now >= appAct.startTime && now <= appAct.endTime) {
+                              appStatusClass = 'bg-emerald-500 text-white font-semibold rounded px-2 py-1 text-center shadow-xs block text-[10px] uppercase tracking-wide';
+                            } else {
+                              appStatusClass = 'bg-blue-500 text-white font-semibold rounded px-2 py-1 text-center shadow-xs block text-[10px] uppercase tracking-wide';
+                            }
+                          }
+
+                          rows.push(
+                            <tr key={`${branch.name}-${i}`} className="hover:bg-slate-50 transition border-b border-slate-100">
+                              {i === 0 && (
+                                <>
+                                  <td className="p-3 border-r border-slate-200 font-extrabold text-slate-800 text-center align-middle bg-slate-50/40 text-[11px]" rowSpan={rowCount}>
+                                    {branch.name}
+                                  </td>
+                                  <td className="p-3 border-r border-slate-200 font-black text-slate-600 align-middle text-center bg-slate-50/40 text-[10.5px] uppercase tracking-wider" rowSpan={rowCount}>
+                                    {leaderName}
+                                  </td>
+                                </>
+                              )}
+
+                              {/* Approved */}
+                              <td className="p-2.5 border-r border-slate-100 align-middle min-w-[150px]">
+                                {appAct ? (
+                                  <div className={appStatusClass}>
+                                    {appAct.name}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-300 italic block text-center">-</span>
+                                )}
+                              </td>
+                              <td className="p-2 border-r border-slate-100 align-middle text-center font-bold text-slate-500 text-[10px]">
+                                {startStr || <span className="text-slate-300">-</span>}
+                              </td>
+                              <td className="p-2 border-r border-slate-200 align-middle text-center font-bold text-slate-500 text-[10px]">
+                                {endStr || <span className="text-slate-300">-</span>}
+                              </td>
+
+                              {/* Pending */}
+                              <td className="p-2.5 border-r border-slate-100 align-middle min-w-[160px]">
+                                {penAct ? (
+                                  <div className="flex justify-between items-center bg-indigo-50/70 border border-indigo-100 text-indigo-900 rounded px-2.5 py-1.5 font-bold shadow-xs text-[10.5px]">
+                                    <span>{penAct.name}</span>
+                                    <div className="flex gap-1 ml-2 shrink-0">
+                                      <button 
+                                        onClick={() => handleApprove(penAct.id, penAct.name, penAct.targetAudience || 'all')}
+                                        className="p-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded shadow-sm cursor-pointer transition"
+                                        title="Duyệt ngay"
+                                      >
+                                        <Check size={9} />
+                                      </button>
+                                      <button 
+                                        onClick={() => handleReject(penAct.id, penAct.name, penAct.targetAudience || 'all')}
+                                        className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded shadow-sm cursor-pointer transition"
+                                        title="Từ chối"
+                                      >
+                                        <X size={9} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-300 italic block text-center">-</span>
+                                )}
+                              </td>
+                              <td className="p-2 border-r border-slate-100 align-middle text-center font-bold text-slate-500 text-[10px]">
+                                {pendTimeStr || <span className="text-slate-300">-</span>}
+                              </td>
+                              <td className="p-2 align-middle text-center">
+                                {penAct ? (
+                                  <span className={`inline-block px-2.5 py-1 text-[9px] font-black uppercase rounded-full shadow-xs ${penColor}`}>
+                                    {penType}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300 italic block text-center">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return rows;
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
 
       {editingBchUser && (
