@@ -777,9 +777,9 @@ export default function AdminScreen() {
   const downloadAccountTemplate = () => {
     let csvContent = "";
     if (isBranch) {
-      csvContent = `kiem_tra,Tên đăng nhập / MSSV,Họ và tên,Vai trò,Tên đơn vị\n,25120001,Nguyễn Văn A,doanvien,${currentUser?.branch || ''}\n,25120002,Trần Thị B,doanvien,${currentUser?.branch || ''}\n`;
+      csvContent = `STT,Họ tên,MSSV,Lớp\n1,Đặng Vũ Thiên Ân,26300001,${currentUser?.branch || ''}\n2,Đào Xuân Anh,26300002,${currentUser?.branch || ''}\n3,Huỳnh Kỳ Anh,26300003,${currentUser?.branch || ''}\n`;
     } else {
-      csvContent = "kiem_tra,Tên đăng nhập / MSSV,Họ và tên,Vai trò,Tên đơn vị\n,21120000,Nguyễn Văn A,doanvien,Chi đoàn 21KTPM\n,chidoan1,Bí thư chi đoàn 1,chidoan,Chi đoàn 1\n";
+      csvContent = "STT,Họ tên,MSSV,Lớp,Vai trò\n1,Đặng Vũ Thiên Ân,26300001,26ICD,doanvien\n2,Đào Xuân Anh,26300002,26ICD,doanvien\n3,Bí thư chi đoàn 1,chidoan1,Chi đoàn 1,chidoan\n";
     }
     const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -808,12 +808,12 @@ export default function AdminScreen() {
            const secondaryAuth = getAuth(secondaryApp);
 
            for (const row of rows) {
-             let usernameStr = row['Tên đăng nhập / MSSV']?.toString().trim();
+             let usernameStr = (row['MSSV'] || row['Tên đăng nhập / MSSV'])?.toString().trim();
              if (!usernameStr) continue;
 
-             const newNameStr = row['Họ và tên']?.toString().trim() || 'No Name';
+             const newNameStr = (row['Họ tên'] || row['Họ và tên'])?.toString().trim() || 'No Name';
              const newRoleStr = isAdmin ? (row['Vai trò']?.toString().trim() || 'doanvien') : 'doanvien';
-             const newBranchStr = isAdmin ? (row['Tên đơn vị']?.toString().trim() || '') : (currentUser?.branch || '');
+             const newBranchStr = isAdmin ? (row['Lớp'] || row['Tên đơn vị'])?.toString().trim() || '' : (currentUser?.branch || '');
 
              if (newRoleStr === 'doanvien') {
                const docRef = doc(db, 'users', `profile_${usernameStr.toLowerCase()}`);
