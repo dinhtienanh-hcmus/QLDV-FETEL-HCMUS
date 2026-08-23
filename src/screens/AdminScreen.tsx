@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, where } from 'firebase/firestore';
 import { db, firebaseConfig } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink } from 'lucide-react';
@@ -815,18 +815,47 @@ export default function AdminScreen() {
              const newRoleStr = isAdmin ? (row['Vai trò']?.toString().trim() || 'doanvien') : 'doanvien';
              const newBranchStr = isAdmin ? (row['Lớp'] || row['Tên đơn vị'])?.toString().trim() || '' : (currentUser?.branch || '');
 
-             if (newRoleStr === 'doanvien') {
-               const docRef = doc(db, 'users', `profile_${usernameStr.toLowerCase()}`);
-               await setDoc(docRef, {
-                 username: usernameStr,
-                 mssv: usernameStr,
-                 email: `${usernameStr}@student.hcmus.edu.vn`,
-                 name: newNameStr,
-                 role: 'doanvien',
-                 branch: newBranchStr,
-                 createdAt: Date.now()
-               }, { merge: true });
-               count++;
+              if (newRoleStr === 'doanvien') {
+                let targetDocId = 'profile_' + usernameStr.toLowerCase();
+                let existingUserFound = false;
+
+                // Check if user already exists with mssv field (active user with google login etc.)
+                const qMssv = query(collection(db, 'users'), where('mssv', '==', usernameStr));
+                const qSnap = await getDocs(qMssv);
+                if (!qSnap.empty) {
+                  targetDocId = qSnap.docs[0].id;
+                  existingUserFound = true;
+                } else {
+                  // Fallback: check by username field
+                  const qUname = query(collection(db, 'users'), where('username', '==', usernameStr));
+                  const qSnap2 = await getDocs(qUname);
+                  if (!qSnap2.empty) {
+                    targetDocId = qSnap2.docs[0].id;
+                    existingUserFound = true;
+                  }
+                }
+
+                if (existingUserFound) {
+                  // Update/Merge the existing active user's data
+                  await updateDoc(doc(db, 'users', targetDocId), {
+                    name: newNameStr,
+                    branch: newBranchStr,
+                    updatedAt: Date.now()
+                  });
+                } else {
+                  // Update or create the profile placeholder
+                  const docRef = doc(db, 'users', targetDocId);
+                  await setDoc(docRef, {
+                    username: usernameStr,
+                    mssv: usernameStr,
+                    email: usernameStr + '@student.hcmus.edu.vn',
+                    name: newNameStr,
+                    role: 'doanvien',
+                    branch: newBranchStr,
+                    createdAt: Date.now()
+                  }, { merge: true });
+                }
+                count++;
              } else if (isAdmin && newRoleStr === 'chidoan') {
                const rawU = usernameStr.toLowerCase();
                const uname = rawU.endsWith('.fetel') ? rawU : `${rawU}.fetel`;
@@ -849,7 +878,7 @@ export default function AdminScreen() {
              }
            }
            await signOut(secondaryAuth);
-           alert(`Đã tạo thành công ${count} tài khoản!`);
+           alert(`Đã cập nhật/import thành công ${count} hồ sơ đoàn viên!`);
            fetchUsers();
         } catch (e) {
            console.error(e);
@@ -1626,7 +1655,7 @@ export default function AdminScreen() {
                   <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
                     <Upload size={16} className="mr-1.5 text-blue-600"/> Import {isBranch ? 'Đoàn viên' : 'Hàng Loạt'} (CSV)
                   </h3>
-                  <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và dùng đúng định dạng để thêm nhanh đoàn viên vào hệ thống. Mật khẩu mặc định: <b>Abc@123</b>.</p>
+                  <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và sử dụng đúng định dạng để cập nhật danh sách thông tin đoàn viên lớp của bạn vào hệ thống.</p>
                   
                   <div className="flex gap-2">
                      <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1 cursor-pointer">
@@ -1637,7 +1666,7 @@ export default function AdminScreen() {
                        <input type="file" accept=".csv" className="hidden" onChange={handleBulkImport} disabled={creatingAccount} />
                      </label>
                   </div>
-                  {creatingAccount && <div className="text-xs text-center mt-2 text-blue-600 font-medium">Đang tiến hành tạo tài khoản, xin vui lòng đợi...</div>}
+                  {creatingAccount && <div className="text-xs text-center mt-2 text-blue-600 font-medium">Đang tiến hành cập nhật/import dữ liệu đoàn viên, xin vui lòng đợi...</div>}
                 </div>
               </>
             )}
