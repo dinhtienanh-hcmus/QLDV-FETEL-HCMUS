@@ -1121,11 +1121,11 @@ export default function AdminScreen() {
             <div className="flex gap-2">
               <div className="w-1/2">
                 <label className="text-[10px] font-semibold text-slate-500 uppercase ml-1 block">ĐRL Tham gia</label>
-                <input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={pointsParticipant} onChange={e => setPointsParticipant(Number(e.target.value))} min={1} required />
+                <input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={pointsParticipant} onChange={e => setPointsParticipant(Number(e.target.value))} min={0} required />
               </div>
               <div className="w-1/2">
                 <label className="text-[10px] font-semibold text-slate-500 uppercase ml-1 block">ĐRL Tổ chức</label>
-                <input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={pointsOrganizer} onChange={e => setPointsOrganizer(Number(e.target.value))} min={1} required />
+                <input type="number" className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg" value={pointsOrganizer} onChange={e => setPointsOrganizer(Number(e.target.value))} min={0} required />
               </div>
             </div>
 
