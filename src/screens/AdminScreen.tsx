@@ -904,10 +904,10 @@ export default function AdminScreen() {
            await signOut(secondaryAuth);
            alert(`Đã cập nhật/import thành công ${count} hồ sơ đoàn viên!`);
            fetchUsers();
-        } catch (e) {
-           console.error(e);
-           alert("Lỗi import.");
-        } finally {
+        } catch (err) {
+            console.error(err);
+            alert("Lỗi import: " + (err?.message || "Vui lòng kiểm tra định dạng file."));
+         } finally {
            setCreatingAccount(false);
            if (e.target) e.target.value = '';
         }
