@@ -37,8 +37,8 @@ interface ScanFeedback {
 }
 
 const DEFAULT_BRANCHES = [
-  '25ICD1', '25DTV1', '25DTV2', '25DTV_DKD',
-  '26ICD1', '26DTV1', '26DTV2', '26DTV_DKD'
+  '25ICD', '25DTV1', '25DTV2', '25DTV_DKD',
+  '26ICD', '26DTV1', '26DTV2', '26DTV_DKD'
 ];
 
 export default function QRScreen() {

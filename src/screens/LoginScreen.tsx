@@ -12,15 +12,15 @@ import { auth, db } from '../lib/firebase';
 import { Lock, AlertCircle, User as UserIcon, LogIn, UserPlus, Users, CheckCircle2 } from 'lucide-react';
 
 const DEFAULT_BRANCHES = [
-  '25ICD1', '25DTV1', '25DTV2', '25DTV_DKD',
-  '26ICD1', '26DTV1', '26DTV2', '26DTV_DKD'
+  '25ICD', '25DTV1', '25DTV2', '25DTV_DKD',
+  '26ICD', '26DTV1', '26DTV2', '26DTV_DKD'
 ];
 
 export default function LoginScreen() {
   const [activeTab, setActiveTab] = useState<'doanvien' | 'bch'>('doanvien');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginId, setLoginId] = useState('');
-  const [selectedBranch, setSelectedBranch] = useState('25ICD1');
+  const [selectedBranch, setSelectedBranch] = useState('25ICD');
   const [customBranch, setCustomBranch] = useState('');
   const [branchOptions, setBranchOptions] = useState<string[]>(DEFAULT_BRANCHES);
   const [password, setPassword] = useState('');
@@ -31,7 +31,7 @@ export default function LoginScreen() {
   // Chi đoàn Google Setup Modal states
   const [pendingGoogleUser, setPendingGoogleUser] = useState<any>(null);
   const [showSetupModal, setShowSetupModal] = useState(false);
-  const [setupBranch, setSetupBranch] = useState('25ICD1');
+  const [setupBranch, setSetupBranch] = useState('25ICD');
   const [customSetupBranch, setCustomSetupBranch] = useState('');
   const [setupError, setSetupError] = useState('');
   const [setupLoading, setSetupLoading] = useState(false);
