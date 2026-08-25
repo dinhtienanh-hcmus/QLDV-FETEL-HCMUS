@@ -276,7 +276,104 @@ export default function AdminScreen() {
         }
         setBranches(list);
       } else {
-        setBranches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        const rawList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        
+        let migrated = false;
+        const updatedList = [];
+        for (const b of rawList) {
+          if (b.name === '25ICD1') {
+            await updateDoc(doc(db, 'branches', b.id), { name: '25ICD', updatedAt: Date.now() });
+            b.name = '25ICD';
+            migrated = true;
+          } else if (b.name === '26ICD1') {
+            await updateDoc(doc(db, 'branches', b.id), { name: '26ICD', updatedAt: Date.now() });
+            b.name = '26ICD';
+            migrated = true;
+          }
+          updatedList.push(b);
+        }
+
+        const existingNames = updatedList.map(b => b.name);
+        const missingDefaultBranches = DEFAULT_BRANCHES.filter(name => !existingNames.includes(name));
+        
+        if (missingDefaultBranches.length > 0) {
+          for (const bName of missingDefaultBranches) {
+            const docRef = await addDoc(collection(db, 'branches'), { name: bName, createdAt: Date.now() });
+            updatedList.push({ id: docRef.id, name: bName });
+            migrated = true;
+          }
+        }
+        
+        if (migrated) {
+          const oldNames = ['25ICD1', '26ICD1'];
+          const newNames = ['25ICD', '26ICD'];
+          
+          const usersRef = collection(db, 'users');
+          const usersSnap = await getDocs(usersRef);
+          for (const userDoc of usersSnap.docs) {
+            const userData = userDoc.data();
+            const idx = oldNames.indexOf(userData.branch || '');
+            if (idx !== -1) {
+              await updateDoc(doc(db, 'users', userDoc.id), {
+                branch: newNames[idx],
+                updatedAt: Date.now()
+              });
+            }
+          }
+          
+          const activitiesRef = collection(db, 'activities');
+          const activitiesSnap = await getDocs(activitiesRef);
+          for (const activityDoc of activitiesSnap.docs) {
+            const actData = activityDoc.data();
+            let needsUpdate = false;
+            const updateFields: any = {};
+            
+            const branchIdx = oldNames.indexOf(actData.branch || '');
+            if (branchIdx !== -1) {
+              updateFields.branch = newNames[branchIdx];
+              needsUpdate = true;
+            }
+            
+            const targetIdx = oldNames.indexOf(actData.targetAudience || '');
+            if (targetIdx !== -1) {
+              updateFields.targetAudience = newNames[targetIdx];
+              needsUpdate = true;
+            }
+            
+            if (actData.cooperatingBranches && Array.isArray(actData.cooperatingBranches)) {
+              const updatedCooperating = actData.cooperatingBranches.map((cb: string) => {
+                const idx = oldNames.indexOf(cb);
+                return idx !== -1 ? newNames[idx] : cb;
+              });
+              if (JSON.stringify(updatedCooperating) !== JSON.stringify(actData.cooperatingBranches)) {
+                updateFields.cooperatingBranches = updatedCooperating;
+                needsUpdate = true;
+              }
+            }
+            
+            if (actData.branches && Array.isArray(actData.branches)) {
+              const updatedBranches = actData.branches.map((b: string) => {
+                const idx = oldNames.indexOf(b);
+                return idx !== -1 ? newNames[idx] : b;
+              });
+              if (JSON.stringify(updatedBranches) !== JSON.stringify(actData.branches)) {
+                updateFields.branches = updatedBranches;
+                needsUpdate = true;
+              }
+            }
+            
+            if (needsUpdate) {
+              updateFields.updatedAt = Date.now();
+              await updateDoc(doc(db, 'activities', activityDoc.id), updateFields);
+            }
+          }
+          
+          fetchUsers();
+          fetchActivities();
+        }
+        
+        updatedList.sort((a, b) => a.name.localeCompare(b.name));
+        setBranches(updatedList);
       }
     } catch (err) {
       console.error('Lỗi tải Chi đoàn:', err);
@@ -543,12 +640,13 @@ export default function AdminScreen() {
       }
     });
 
-    const chartData = Object.entries(statsMap)
+    const allBranchesData = Object.entries(statsMap)
       .map(([name, value]) => ({ name: `Chi đoàn ${name}`, value }))
-      .filter(item => item.value > 0)
       .sort((a, b) => b.value - a.value);
 
-    return { chartData, totalDoanVien };
+    const chartData = allBranchesData.filter(item => item.value > 0);
+
+    return { chartData, allBranchesData, totalDoanVien };
   };
 
   const fetchActivities = async () => {
@@ -1578,7 +1676,7 @@ export default function AdminScreen() {
           <div className="space-y-4">
             {/* Thống kê Đoàn viên */}
             {(() => {
-              const { chartData, totalDoanVien } = getBranchStats();
+              const { chartData, allBranchesData, totalDoanVien } = getBranchStats();
               return (
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4 pb-3 border-b border-slate-100">
@@ -1593,48 +1691,54 @@ export default function AdminScreen() {
                     </div>
                   </div>
 
-                  {chartData.length === 0 ? (
+                  {allBranchesData.length === 0 ? (
                     <div className="text-center py-8 text-slate-400 text-xs italic">
                       Chưa có dữ liệu đoàn viên để hiển thị biểu đồ.
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
                       <div className="lg:col-span-5 flex justify-center">
-                        <div className="w-full max-w-[280px] h-[260px] relative">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie
-                                data={chartData}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={60}
-                                outerRadius={85}
-                                paddingAngle={3}
-                                dataKey="value"
-                              >
-                                {chartData.map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ))}
-                              </Pie>
-                              <Tooltip 
-                                contentStyle={{ 
-                                  backgroundColor: '#fff', 
-                                  border: '1px solid #e2e8f0',
-                                  borderRadius: '12px',
-                                  fontSize: '11px',
-                                  fontWeight: '600',
-                                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                                }}
-                                formatter={(value: number) => [`${value} đoàn viên`, 'Số lượng']}
-                              />
-                            </PieChart>
-                          </ResponsiveContainer>
-                          {/* Nhãn trung tâm của biểu đồ donut */}
-                          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-1">
-                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Đoàn viên</span>
-                            <span className="text-2xl font-black text-slate-800">{totalDoanVien}</span>
+                        {chartData.length === 0 ? (
+                          <div className="text-center py-12 text-slate-400 text-xs italic bg-slate-50 border border-dashed border-slate-200 rounded-2xl w-full max-w-[280px]">
+                            Chưa có đoàn viên đăng ký
                           </div>
-                        </div>
+                        ) : (
+                          <div className="w-full max-w-[280px] h-[260px] relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie
+                                  data={chartData}
+                                  cx="50%"
+                                  cy="50%"
+                                  innerRadius={60}
+                                  outerRadius={85}
+                                  paddingAngle={3}
+                                  dataKey="value"
+                                >
+                                  {chartData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                  ))}
+                                </Pie>
+                                <Tooltip 
+                                  contentStyle={{ 
+                                    backgroundColor: '#fff', 
+                                    border: '1px solid #e2e8f0',
+                                    borderRadius: '12px',
+                                    fontSize: '11px',
+                                    fontWeight: '600',
+                                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                                  }}
+                                  formatter={(value: number) => [`${value} đoàn viên`, 'Số lượng']}
+                                />
+                              </PieChart>
+                            </ResponsiveContainer>
+                            {/* Nhãn trung tâm của biểu đồ donut */}
+                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-1">
+                              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Đoàn viên</span>
+                              <span className="text-2xl font-black text-slate-800">{totalDoanVien}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <div className="lg:col-span-7 space-y-2 max-h-[260px] overflow-y-auto pr-2 no-scrollbar">
@@ -1644,7 +1748,7 @@ export default function AdminScreen() {
                           <span className="col-span-3 text-right">Tỷ lệ</span>
                         </div>
                         <div className="space-y-1.5">
-                          {chartData.map((item, index) => {
+                          {allBranchesData.map((item, index) => {
                             const percent = totalDoanVien > 0 ? ((item.value / totalDoanVien) * 100).toFixed(1) : '0';
                             const color = COLORS[index % COLORS.length];
                             return (
