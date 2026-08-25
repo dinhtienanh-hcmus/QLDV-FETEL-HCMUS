@@ -76,18 +76,7 @@ export default function QRScreen() {
 
   useEffect(() => {
     if (!currentUser?.uid) return;
-
     fetchUserActivities();
-
-    // Listen to activities collection changes in real-time
-    const q = query(collection(db, 'activities'));
-    const unsubscribe = onSnapshot(q, () => {
-      fetchUserActivities();
-    }, (err) => {
-      console.error("Error listening to user activities:", err);
-    });
-
-    return () => unsubscribe();
   }, [currentUser?.uid]);
 
   // Clean up camera on unmount or tab switch
@@ -102,26 +91,33 @@ export default function QRScreen() {
     try {
       const q = query(collection(db, 'activities'));
       const snapshot = await getDocs(q);
-      const acts: UserActivity[] = [];
-
-      for (const actDoc of snapshot.docs) {
+      
+      // Fetch all registrations in parallel to prevent sequential database query lag
+      const promises = snapshot.docs.map(async (actDoc) => {
         const actData = actDoc.data();
-        const regSnap = await getDoc(doc(db, 'activities', actDoc.id, 'registrations', currentUser.uid));
-
-        if (regSnap.exists()) {
-          const regData = regSnap.data();
-          if (regData.status === 'attended') {
-            acts.push({
-              id: actDoc.id,
-              name: actData.name,
-              time: actData.startTime 
-                ? formatDateToDDMMYYYY(actData.startTime) 
-                : 'N/A',
-              status: 'attended',
-            });
+        try {
+          const regSnap = await getDoc(doc(db, 'activities', actDoc.id, 'registrations', currentUser.uid));
+          if (regSnap.exists()) {
+            const regData = regSnap.data();
+            if (regData.status === 'attended') {
+              return {
+                id: actDoc.id,
+                name: (actData.name || 'Hoạt động Đoàn') as string,
+                time: actData.startTime 
+                  ? formatDateToDDMMYYYY(actData.startTime) 
+                  : 'N/A',
+                status: 'attended' as const,
+              } as UserActivity;
+            }
           }
+        } catch (e) {
+          console.error("Error fetching individual registration:", actDoc.id, e);
         }
-      }
+        return null;
+      });
+
+      const results = await Promise.all(promises);
+      const acts = results.filter((r): r is UserActivity => r !== null);
       setUserActivities(acts);
     } catch (err) {
       console.error("Error fetching user activities:", err);
@@ -180,8 +176,8 @@ export default function QRScreen() {
 
       try {
         const parsed = JSON.parse(rawQrContent);
-        activityId = parsed.activityId || '';
-        activityName = parsed.activityName || '';
+        activityId = parsed.activityId || parsed.id || '';
+        activityName = parsed.activityName || parsed.n || '';
       } catch {
         activityId = rawQrContent.trim();
       }

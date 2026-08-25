@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, orderBy, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, doc, getDoc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import QRCode from 'react-qr-code';
@@ -15,7 +15,11 @@ import {
   ListPlus, 
   Clock, 
   Sparkles, 
-  X
+  X,
+  Maximize2,
+  Minimize2,
+  Settings,
+  Sliders
 } from 'lucide-react';
 
 interface Activity {
@@ -49,9 +53,12 @@ export default function ScanScreen() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<string>('');
   
-  // Dynamic QR Code states (10 seconds timer)
+  // Customizable QR Code states & settings
   const [qrToken, setQrToken] = useState<number>(Date.now());
-  const [timeLeft, setTimeLeft] = useState<number>(10);
+  const [qrMode, setQrMode] = useState<'static' | 'dynamic_short' | 'dynamic_full'>('dynamic_short');
+  const [refreshInterval, setRefreshInterval] = useState<number>(30); // Default to 30s for more stable hall scans
+  const [timeLeft, setTimeLeft] = useState<number>(30);
+  const [isFullscreenQR, setIsFullscreenQR] = useState<boolean>(false);
 
   // Manual & Bulk Student Entry states
   const [inputTab, setInputTab] = useState<'single' | 'bulk'>('single');
@@ -103,24 +110,31 @@ export default function ScanScreen() {
     return () => unsubscribe();
   }, [currentUser?.uid, currentUser?.role, currentUser?.branch]);
 
-  // 10-second timer for Dynamic QR Code
+  // Customizable timer for Dynamic QR Code
   useEffect(() => {
     if (!selectedActivity) return;
+
+    if (refreshInterval === 0) {
+      setTimeLeft(0);
+      return;
+    }
+
+    setTimeLeft(refreshInterval);
 
     const interval = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
           setQrToken(Date.now());
-          return 10;
+          return refreshInterval;
         }
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [selectedActivity]);
+  }, [selectedActivity, refreshInterval]);
 
-  // 2. Real-time attended list listener whenever selectedActivity changes
+  // 2. Real-time attended list listener with optimized on-the-fly missing user profiles lookup
   useEffect(() => {
     if (!selectedActivity) {
       setAttendedList([]);
@@ -128,7 +142,7 @@ export default function ScanScreen() {
     }
 
     setQrToken(Date.now());
-    setTimeLeft(10);
+    setTimeLeft(refreshInterval === 0 ? 0 : refreshInterval);
     setLoadingAttended(true);
 
     let unsubReg: (() => void) | null = null;
@@ -149,7 +163,34 @@ export default function ScanScreen() {
 
         // Listen in real-time to registrations
         const regRef = collection(db, 'activities', selectedActivity, 'registrations');
-        unsubReg = onSnapshot(regRef, (regSnap) => {
+        unsubReg = onSnapshot(regRef, async (regSnap) => {
+          const missingUserIds: string[] = [];
+          regSnap.forEach(rDoc => {
+            if (!userMapById.has(rDoc.id)) {
+              missingUserIds.push(rDoc.id);
+            }
+          });
+
+          // Fetch any missing users dynamically to prevent desync of newly created accounts
+          if (missingUserIds.length > 0) {
+            const fetchPromises = missingUserIds.map(async (uid) => {
+              try {
+                const uDoc = await getDoc(doc(db, 'users', uid));
+                if (uDoc.exists()) {
+                  const data = uDoc.data();
+                  userMapById.set(uid, {
+                    name: data.name || 'Đoàn viên',
+                    mssv: data.mssv || '---',
+                    branch: data.branch || 'N/A'
+                  });
+                }
+              } catch (e) {
+                console.error("Error fetching missing user:", uid, e);
+              }
+            });
+            await Promise.all(fetchPromises);
+          }
+
           const list: AttendedStudent[] = [];
           regSnap.forEach(rDoc => {
             const rData = rDoc.data();
@@ -305,12 +346,16 @@ export default function ScanScreen() {
   );
 
   const qrPayload = selectedActivity 
-    ? JSON.stringify({
-        activityId: selectedActivity,
-        activityName: currentActivityObj?.name || '',
-        token: qrToken,
-        updatedAt: new Date(qrToken).toISOString()
-      })
+    ? qrMode === 'static'
+      ? selectedActivity
+      : qrMode === 'dynamic_short'
+        ? JSON.stringify({ id: selectedActivity, t: qrToken })
+        : JSON.stringify({
+            activityId: selectedActivity,
+            activityName: currentActivityObj?.name || '',
+            token: qrToken,
+            updatedAt: new Date(qrToken).toISOString()
+          })
     : '';
 
   return (
@@ -322,7 +367,7 @@ export default function ScanScreen() {
           <h2 className="text-lg font-bold">Mã QR & Điểm danh Hoạt động</h2>
         </div>
         <p className="text-xs text-emerald-100 opacity-80 mt-1">
-          Mã QR tự động đổi sau mỗi 10s và quản lý danh sách sinh viên tham gia
+          Hỗ trợ mã QR tĩnh cực nhạy cho máy chiếu hội trường lớn hoặc mã bảo mật tự động đổi
         </p>
       </div>
 
@@ -363,52 +408,114 @@ export default function ScanScreen() {
         {/* Grid: Dynamic QR Code & Manual Input */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left: Dynamic QR Code Box */}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center text-center justify-between">
-            <div className="w-full flex items-center justify-between mb-4">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center justify-between space-y-4">
+            <div className="w-full flex items-center justify-between pb-3 border-b border-slate-100">
               <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
                 <QrCode size={16} className="mr-1.5 text-emerald-600" />
-                Mã QR Điểm danh (10s/lần)
+                Màn hình QR máy chiếu
               </span>
-              <button
-                type="button"
-                onClick={handleRefreshQR}
-                className="flex items-center space-x-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg border border-emerald-200 transition cursor-pointer"
-                title="Tạo mã QR mới ngay lập tức"
-              >
-                <RefreshCw size={13} className="animate-spin-slow" />
-                <span>Đổi mã ngay</span>
-              </button>
+              
+              <div className="flex gap-1.5">
+                {selectedActivity && (
+                  <button
+                    type="button"
+                    onClick={() => setIsFullscreenQR(true)}
+                    className="flex items-center space-x-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg border border-blue-200 transition cursor-pointer"
+                    title="Bật chế độ trình chiếu toàn màn hình cho sinh viên dễ quét"
+                  >
+                    <Maximize2 size={13} />
+                    <span>Trình chiếu</span>
+                  </button>
+                )}
+
+                {refreshInterval > 0 && selectedActivity && (
+                  <button
+                    type="button"
+                    onClick={handleRefreshQR}
+                    className="flex items-center space-x-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg border border-emerald-200 transition cursor-pointer"
+                    title="Tạo mã QR mới ngay lập tức"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Đổi mã</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {selectedActivity ? (
-              <div className="flex flex-col items-center my-2 w-full">
+              <div className="flex flex-col items-center w-full">
+                {/* CONFIGURATION SUB-BAR FOR ADMINS */}
+                <div className="w-full bg-slate-50 p-3 rounded-xl border border-slate-200/80 mb-4 text-left grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1 flex items-center">
+                      <Sliders size={11} className="mr-1 text-slate-400" /> Loại mã QR
+                    </label>
+                    <select
+                      value={qrMode}
+                      onChange={e => setQrMode(e.target.value as any)}
+                      className="w-full text-[11px] p-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500 font-bold text-slate-700 cursor-pointer"
+                    >
+                      <option value="static">Mã tĩnh (Quét xa, nhạy nhất cho hội trường lớn)</option>
+                      <option value="dynamic_short">Mã bảo mật gọn (Khuyên dùng - Dynamic)</option>
+                      <option value="dynamic_full">Mã bảo mật chi tiết (Gốc - Dynamic)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1 flex items-center">
+                      <Clock size={11} className="mr-1 text-slate-400" /> Tần suất đổi mã
+                    </label>
+                    <select
+                      value={refreshInterval}
+                      onChange={e => setRefreshInterval(Number(e.target.value))}
+                      className="w-full text-[11px] p-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-emerald-500 font-bold text-slate-700 cursor-pointer"
+                    >
+                      <option value={0}>Không đổi tự động (Mã tĩnh cố định)</option>
+                      <option value={10}>10 giây</option>
+                      <option value={30}>30 giây</option>
+                      <option value={60}>60 giây (1 phút)</option>
+                      <option value={120}>120 giây (2 phút)</option>
+                      <option value={300}>300 giây (5 phút)</option>
+                    </select>
+                  </div>
+                </div>
+
                 {/* QR Display Frame */}
-                <div className="p-4 bg-white border-2 border-emerald-500/20 rounded-2xl shadow-md relative group">
-                  <QRCode value={qrPayload} size={200} fgColor="#0f172a" level="Q" />
+                <div className="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm relative group flex flex-col items-center">
+                  <div className="p-3 bg-white border border-slate-100 rounded-xl shadow-xs">
+                    <QRCode value={qrPayload} size={210} fgColor="#0f172a" level={qrMode === 'static' ? 'M' : 'Q'} />
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-2">
+                    {qrMode === 'static' ? 'Chế độ: Mã quét xa / Mã tĩnh' : `Chế độ: Mã động bảo mật`}
+                  </span>
                 </div>
 
                 {/* Timer Bar & Badge */}
-                <div className="w-full max-w-xs mt-4">
-                  <div className="flex justify-between items-center text-xs font-bold mb-1.5 text-slate-600">
-                    <span className="flex items-center text-emerald-700">
-                      <Clock size={13} className="mr-1" /> Tự động đổi mã sau:
-                    </span>
-                    <span className="text-emerald-700 font-mono text-sm bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                      {String(timeLeft).padStart(2, '0')}s
-                    </span>
-                  </div>
+                {refreshInterval > 0 && (
+                  <div className="w-full max-w-xs mt-4">
+                    <div className="flex justify-between items-center text-xs font-bold mb-1.5 text-slate-600">
+                      <span className="flex items-center text-emerald-700">
+                        <Clock size={13} className="mr-1" /> Tự động đổi mã sau:
+                      </span>
+                      <span className="text-emerald-700 font-mono text-sm bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        {String(timeLeft).padStart(2, '0')}s
+                      </span>
+                    </div>
 
-                  {/* Progress bar */}
-                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                    <div 
-                      className="bg-emerald-600 h-full transition-all duration-1000 ease-linear rounded-full"
-                      style={{ width: `${(timeLeft / 10) * 100}%` }}
-                    />
+                    {/* Progress bar */}
+                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
+                      <div 
+                        className="bg-emerald-600 h-full transition-all duration-1000 ease-linear rounded-full"
+                        style={{ width: `${(timeLeft / refreshInterval) * 100}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
-                <p className="text-[11px] text-slate-500 mt-4 leading-relaxed max-w-xs">
-                  Hiển thị màn hình/máy chiếu này để sinh viên quét mã xác nhận tham gia hoạt động. Mã được làm mới tự động để tránh chia sẻ trái phép.
+                <p className="text-[10px] text-slate-500 mt-4 leading-relaxed max-w-xs">
+                  {qrMode === 'static' 
+                    ? '💡 Bạn đang chọn chế độ Mã Tĩnh. Mã này cực kỳ dễ quét từ cự ly xa hoặc máy chiếu chất lượng thấp, không lo bị hết hạn giữa chừng.' 
+                    : `💡 Mã tự động làm mới sau ${refreshInterval}s. Hãy nhấn nút "Trình chiếu" để hiển thị QR cỡ cực đại trên máy chiếu hội trường.`}
                 </p>
               </div>
             ) : (
@@ -642,6 +749,103 @@ export default function ScanScreen() {
           </div>
         </div>
       </div>
+
+      {/* PROJECTOR FULLSCREEN QR PRESENTATION MODAL */}
+      {isFullscreenQR && selectedActivity && (
+        <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col items-center justify-center p-6 text-white animate-in fade-in duration-200">
+          {/* Header Controls */}
+          <div className="absolute top-6 right-6 flex items-center gap-3">
+            <span className="text-xs font-bold text-slate-400 bg-slate-800 border border-slate-700 px-3.5 py-1.5 rounded-xl uppercase tracking-wider">
+              Phím ESC hoặc nhấn nút Đóng để thoát
+            </span>
+            <button
+              onClick={() => setIsFullscreenQR(false)}
+              className="p-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl border border-slate-700 transition cursor-pointer flex items-center gap-1 font-bold text-sm"
+              title="Thoát trình chiếu"
+            >
+              <Minimize2 size={18} />
+              <span>Đóng</span>
+            </button>
+          </div>
+
+          <div className="w-full max-w-4xl flex flex-col items-center text-center space-y-6">
+            {/* Activity Metadata Header */}
+            <div>
+              <span className="text-xs font-black text-emerald-400 uppercase tracking-widest bg-emerald-950/80 px-4 py-1.5 rounded-full border border-emerald-800/60 mb-3 inline-block">
+                📢 TRÌNH CHIẾU ĐIỂM DANH HOẠT ĐỘNG
+              </span>
+              <h1 className="text-3xl md:text-4xl font-black tracking-tight text-white line-clamp-2 max-w-3xl leading-tight">
+                {currentActivityObj?.name}
+              </h1>
+              <p className="text-sm md:text-base text-slate-400 mt-2 font-medium">
+                📍 Địa điểm: {currentActivityObj?.location || 'Trực tuyến'} | Đối tượng: {currentActivityObj?.targetAudience === 'all' ? 'Toàn khoa' : `Chi đoàn ${currentActivityObj?.targetAudience}`}
+              </p>
+            </div>
+
+            {/* Giant High-Contrast QR Code Wrapper */}
+            <div className="p-8 bg-white border-[6px] border-emerald-500/30 rounded-[28px] shadow-2xl relative flex flex-col items-center justify-center animate-in zoom-in-95 duration-300">
+              <QRCode value={qrPayload} size={360} fgColor="#020617" level={qrMode === 'static' ? 'M' : 'Q'} />
+              
+              {refreshInterval > 0 && (
+                <div className="absolute -bottom-3 bg-slate-900 border-2 border-slate-800 px-4 py-1.5 rounded-full text-[11px] font-black tracking-wider text-emerald-400 shadow-xl flex items-center gap-1.5 font-mono">
+                  <Clock size={12} className="animate-pulse" />
+                  MÃ ĐỔI SAU: {String(timeLeft).padStart(2, '0')} GIÂY
+                </div>
+              )}
+            </div>
+
+            {/* Dynamic Timer Progress Bar */}
+            {refreshInterval > 0 && (
+              <div className="w-full max-w-lg">
+                <div className="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden border border-slate-700/60 shadow-inner">
+                  <div 
+                    className="bg-emerald-500 h-full transition-all duration-1000 ease-linear rounded-full"
+                    style={{ width: `${(timeLeft / refreshInterval) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Live Stats Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-xl text-center">
+              <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-md">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Đang điểm danh</div>
+                <div className="text-2xl font-black text-emerald-400 mt-1 font-mono flex items-center justify-center gap-2">
+                  <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping"></span>
+                  {filteredAttendedList.length} Sinh viên
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800 shadow-md">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Trạng thái mã QR</div>
+                <div className="text-lg font-bold text-slate-200 mt-1 uppercase tracking-wide">
+                  {qrMode === 'static' ? (
+                    <span className="text-blue-400">🟢 Mã tĩnh quét xa</span>
+                  ) : (
+                    <span className="text-amber-400">🛡️ Mã động bảo mật</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Student Instructions */}
+            <p className="text-xs text-slate-500 leading-relaxed max-w-md">
+              💡 <strong>Hướng dẫn sinh viên:</strong> Mở ứng dụng điện thoại, vào mục <strong>"Cá nhân & Điểm danh"</strong>, bật Camera và quét mã QR trên màn hình. Danh sách của bạn sẽ xuất hiện trên bảng điểm danh của BCH ngay lập tức!
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Esc key listener for full-screen */}
+      {useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'Escape') {
+            setIsFullscreenQR(false);
+          }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [])}
     </div>
   );
 }

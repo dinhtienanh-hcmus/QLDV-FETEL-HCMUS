@@ -301,14 +301,96 @@ export default function AdminScreen() {
 
   const handleUpdateBranch = async (id: string) => {
     if (!editingBranchName.trim()) return;
+    const oldBranch = branches.find(b => b.id === id);
+    const oldBranchName = oldBranch?.name;
+    const newBranchName = editingBranchName.trim();
+    if (!oldBranchName) return;
+
     try {
+      // 1. Update the branch document itself
       await updateDoc(doc(db, 'branches', id), {
-        name: editingBranchName.trim(),
+        name: newBranchName,
         updatedAt: Date.now(),
       });
+
+      // 2. Propagate name changes to users and activities in Firestore
+      if (oldBranchName.trim().toLowerCase() !== newBranchName.trim().toLowerCase()) {
+        // Query and update all users in that branch
+        const usersRef = collection(db, 'users');
+        const usersSnap = await getDocs(usersRef);
+        const userPromises: Promise<void>[] = [];
+
+        usersSnap.forEach((userDoc) => {
+          const userData = userDoc.data();
+          if (userData.branch && userData.branch.trim().toLowerCase() === oldBranchName.trim().toLowerCase()) {
+            userPromises.push(
+              updateDoc(doc(db, 'users', userDoc.id), {
+                branch: newBranchName,
+                updatedAt: Date.now()
+              })
+            );
+          }
+        });
+
+        if (userPromises.length > 0) {
+          await Promise.all(userPromises);
+        }
+
+        // Query and update all activities using that branch
+        const activitiesRef = collection(db, 'activities');
+        const activitiesSnap = await getDocs(activitiesRef);
+        const activityPromises: Promise<void>[] = [];
+
+        activitiesSnap.forEach((activityDoc) => {
+          const actData = activityDoc.data();
+          let needsUpdate = false;
+          const updateFields: any = {};
+
+          if (actData.branch && actData.branch.trim().toLowerCase() === oldBranchName.trim().toLowerCase()) {
+            updateFields.branch = newBranchName;
+            needsUpdate = true;
+          }
+          if (actData.targetAudience && actData.targetAudience.trim().toLowerCase() === oldBranchName.trim().toLowerCase()) {
+            updateFields.targetAudience = newBranchName;
+            needsUpdate = true;
+          }
+          if (actData.cooperatingBranches && Array.isArray(actData.cooperatingBranches)) {
+            const updatedCooperating = actData.cooperatingBranches.map((cb: string) => 
+              cb.trim().toLowerCase() === oldBranchName.trim().toLowerCase() ? newBranchName : cb
+            );
+            if (JSON.stringify(updatedCooperating) !== JSON.stringify(actData.cooperatingBranches)) {
+              updateFields.cooperatingBranches = updatedCooperating;
+              needsUpdate = true;
+            }
+          }
+          if (actData.branches && Array.isArray(actData.branches)) {
+            const updatedBranches = actData.branches.map((b: string) => 
+              b.trim().toLowerCase() === oldBranchName.trim().toLowerCase() ? newBranchName : b
+            );
+            if (JSON.stringify(updatedBranches) !== JSON.stringify(actData.branches)) {
+              updateFields.branches = updatedBranches;
+              needsUpdate = true;
+            }
+          }
+
+          if (needsUpdate) {
+            updateFields.updatedAt = Date.now();
+            activityPromises.push(
+              updateDoc(doc(db, 'activities', activityDoc.id), updateFields)
+            );
+          }
+        });
+
+        if (activityPromises.length > 0) {
+          await Promise.all(activityPromises);
+        }
+      }
+
       setEditingBranchId(null);
       setEditingBranchName('');
       fetchBranches();
+      fetchUsers();
+      fetchActivities();
     } catch (err) {
       console.error(err);
       alert('Không thể cập nhật Chi đoàn.');
@@ -444,10 +526,7 @@ export default function AdminScreen() {
 
   const getBranchStats = () => {
     const statsMap: { [key: string]: number } = {};
-    const knownBranches = Array.from(new Set([
-      ...branches.map(b => b.name),
-      ...DEFAULT_BRANCHES
-    ]));
+    const knownBranches = branches.map(b => b.name);
 
     knownBranches.forEach(b => {
       statsMap[b] = 0;
@@ -457,7 +536,7 @@ export default function AdminScreen() {
     usersList.forEach(usr => {
       if (usr.role === 'doanvien' && usr.branch) {
         const bName = usr.branch.trim();
-        if (bName) {
+        if (bName && knownBranches.includes(bName)) {
           statsMap[bName] = (statsMap[bName] || 0) + 1;
           totalDoanVien++;
         }
@@ -1387,7 +1466,9 @@ export default function AdminScreen() {
                 {isAdmin ? (
                   <>
                     <option value="all">Tất cả</option>
-                    <option value="chi_doan_1">Chi đoàn 1</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.name}>{b.name}</option>
+                    ))}
                   </>
                 ) : (
                   <>
@@ -1799,8 +1880,8 @@ export default function AdminScreen() {
                     onChange={e => setSelectedBranchFilter(e.target.value)}
                   >
                     <option value="">-- Tất cả Chi đoàn / Lớp --</option>
-                    {Array.from(new Set([...branches.map(b => b.name), ...DEFAULT_BRANCHES])).map(b => (
-                      <option key={b} value={b}>Chi đoàn {b}</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.name}>Chi đoàn {b.name}</option>
                     ))}
                   </select>
                 )}
