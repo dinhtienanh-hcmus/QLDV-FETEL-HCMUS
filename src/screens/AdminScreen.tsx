@@ -565,7 +565,58 @@ export default function AdminScreen() {
       const snapshot = await getDocs(collection(db, 'users'));
       const rawUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
       
-      const cleanedUsers = rawUsers.map(usr => {
+      // 1. Phân loại tài khoản đã đăng nhập thực tế (dùng Auth UID)
+      const activeUserMssvs = new Set<string>();
+      const activeUserEmails = new Set<string>();
+      
+      rawUsers.forEach(u => {
+        if (!u.id.startsWith('profile_')) {
+          const m = (u.mssv || u.username || '').toLowerCase().trim();
+          if (m) activeUserMssvs.add(m);
+          const email = (u.email || '').toLowerCase().trim();
+          if (email) activeUserEmails.add(email);
+        }
+      });
+
+      // 2. Lọc bỏ các bản ghi placeholder profile_ bị trùng lặp với tài khoản đã kích hoạt
+      const deduplicatedRaw: any[] = [];
+      const seenIdentity = new Set<string>();
+
+      // Sắp xếp: Ưu tiên tài khoản thật (Auth UID) đứng trước, placeholder profile_ đứng sau
+      const sortedUsers = [...rawUsers].sort((a, b) => {
+        const aIsProf = a.id.startsWith('profile_') ? 1 : 0;
+        const bIsProf = b.id.startsWith('profile_') ? 1 : 0;
+        return aIsProf - bIsProf;
+      });
+
+      for (const usr of sortedUsers) {
+        const isPlaceholder = usr.id.startsWith('profile_');
+        const mssvKey = (usr.mssv || usr.username || (isPlaceholder ? usr.id.replace('profile_', '') : '')).toLowerCase().trim();
+        const emailKey = (usr.email || '').toLowerCase().trim();
+
+        // Nếu là bản ghi tạm profile_ nhưng đoàn viên này đã đăng nhập tài khoản thật:
+        if (isPlaceholder && ((mssvKey && activeUserMssvs.has(mssvKey)) || (emailKey && activeUserEmails.has(emailKey)))) {
+          if (isAdmin) {
+            deleteDoc(doc(db, 'users', usr.id)).catch(console.error);
+          }
+          continue; // Bỏ qua, không đếm trùng vào danh sách và thống kê
+        }
+
+        // Kiểm tra tránh trùng lặp giữa các bản ghi placeholder với nhau
+        if (mssvKey) {
+          if (seenIdentity.has(mssvKey)) {
+            if (isAdmin && isPlaceholder) {
+              deleteDoc(doc(db, 'users', usr.id)).catch(console.error);
+            }
+            continue;
+          }
+          seenIdentity.add(mssvKey);
+        }
+
+        deduplicatedRaw.push(usr);
+      }
+
+      const cleanedUsers = deduplicatedRaw.map(usr => {
         let modified = false;
         let cTerm = usr.committeeTerm;
         let cPeriod = usr.committeePeriod;
@@ -584,7 +635,7 @@ export default function AdminScreen() {
           modified = true;
         }
 
-        if (modified) {
+        if (modified && isAdmin) {
           updateDoc(doc(db, 'users', usr.id), {
             committeeTerm: cTerm,
             committeePeriod: cPeriod,
@@ -633,8 +684,9 @@ export default function AdminScreen() {
     usersList.forEach(usr => {
       if (usr.role === 'doanvien' && usr.branch) {
         const bName = usr.branch.trim();
-        if (bName && knownBranches.includes(bName)) {
-          statsMap[bName] = (statsMap[bName] || 0) + 1;
+        const matched = knownBranches.find(k => k.toLowerCase() === bName.toLowerCase());
+        if (matched) {
+          statsMap[matched] = (statsMap[matched] || 0) + 1;
           totalDoanVien++;
         }
       }
@@ -1096,6 +1148,9 @@ export default function AdminScreen() {
                     branch: newBranchStr,
                     updatedAt: Date.now()
                   });
+                  if (targetDocId !== 'profile_' + usernameStr.toLowerCase()) {
+                    deleteDoc(doc(db, 'users', 'profile_' + usernameStr.toLowerCase())).catch(() => {});
+                  }
                 } else {
                   // Update or create the profile placeholder
                   const docRef = doc(db, 'users', targetDocId);

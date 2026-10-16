@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { CreditCard, CheckCircle2, AlertCircle, Search, RefreshCw, User, Users } from 'lucide-react';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 interface FoundProfile {
@@ -107,6 +107,14 @@ export default function OnboardingModal() {
         mssv: foundProfile.mssv,
         branch: foundProfile.branch,
       });
+
+      // Xoá bản ghi placeholder profile_ để tránh bị nhân đôi đoàn viên
+      try {
+        const cleanMssv = foundProfile.mssv.trim().toLowerCase();
+        await deleteDoc(doc(db, 'users', `profile_${cleanMssv}`));
+      } catch (cleanErr) {
+        console.warn('Could not clean up placeholder profile:', cleanErr);
+      }
     } catch (err: any) {
       console.error('Error linking profile:', err);
       setError(err.message || 'Liên kết tài khoản thất bại. Vui lòng thử lại.');
