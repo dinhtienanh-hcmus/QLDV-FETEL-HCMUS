@@ -223,12 +223,21 @@ export default function LoginScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 relative overflow-hidden">
-      <div className="absolute top-0 w-full h-[40%] bg-[#1d4ed8] rounded-b-[40px] drop-shadow-xl z-0"></div>
+    <div className="flex flex-col h-full relative overflow-hidden bg-transparent">
+      {/* Curved top header banner with vibrant red gradient & panorama watermark */}
+      <div 
+        className="absolute top-0 w-full h-[40%] rounded-b-[40px] drop-shadow-xl shadow-red-900/30 z-0 overflow-hidden bg-cover bg-center"
+        style={{ backgroundImage: `url('/background.webp')` }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-red-600/90 via-rose-600/85 to-red-700/92 backdrop-blur-[1px]" />
+        {/* Soft decorative ambient lighting */}
+        <div className="absolute -top-10 -right-10 w-44 h-44 bg-white/20 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-8 -left-8 w-36 h-36 bg-black/20 rounded-full blur-xl pointer-events-none" />
+      </div>
       
       <div className="flex-1 px-6 z-10 flex flex-col justify-center py-8 no-scrollbar overflow-y-auto w-full max-w-md mx-auto">
         <div className="mb-6 text-center text-white mx-auto">
-          <div className="bg-white/95 backdrop-blur-sm inline-flex items-center justify-center gap-3.5 px-4 py-2.5 rounded-[999px] shadow-xl mb-4 shadow-blue-900/20 border border-white/20">
+          <div className="bg-white/95 backdrop-blur-sm inline-flex items-center justify-center gap-3.5 px-4 py-2.5 rounded-[999px] shadow-xl mb-4 shadow-red-950/25 border border-white/30">
              <div className="h-10 w-auto flex items-center justify-center">
                 <img src="https://lh3.googleusercontent.com/d/1C0ixDWE5Sh1AsHpYt9PHKbxIcWAbAPUe" referrerPolicy="no-referrer" alt="Khoa Điển tử - Viễn thông" className="h-full w-auto object-contain drop-shadow-sm" />
              </div>
@@ -239,24 +248,24 @@ export default function LoginScreen() {
                 <img src="https://lh3.googleusercontent.com/d/1FzS7uBuKIT4HkRkkq6h5lPc_XLh3RBEa" referrerPolicy="no-referrer" alt="Hội Sinh Viên" className="h-full w-full object-contain drop-shadow-sm" />
              </div>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">FETEL@HCMUS</h1>
-          <p className="text-xs text-blue-100 mt-2 opacity-90 leading-relaxed font-medium">Sổ tay Đoàn viên - Hội viên trực tuyến</p>
+          <h1 className="text-2xl font-black tracking-tight drop-shadow-sm">FETEL@HCMUS</h1>
+          <p className="text-xs text-red-100 mt-2 opacity-95 leading-relaxed font-semibold drop-shadow-sm">Sổ tay Đoàn viên - Hội viên trực tuyến</p>
         </div>
 
-        <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100">
+        <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-2xl border border-white/80">
           {/* Main Role Tabs */}
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-6">
+          <div className="flex bg-slate-100/90 p-1.5 rounded-2xl mb-6">
             <button
               type="button"
               onClick={() => { setActiveTab('doanvien'); setError(''); setMessage(''); }}
-              className={`flex-1 py-2.5 px-3 text-xs font-bold rounded-xl transition-all ${activeTab === 'doanvien' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 py-2.5 px-3 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeTab === 'doanvien' ? 'bg-white text-red-600 shadow-md shadow-red-500/10' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Đoàn viên / Sinh viên
             </button>
             <button
               type="button"
               onClick={() => { setActiveTab('bch'); setError(''); setMessage(''); }}
-              className={`flex-1 py-2.5 px-3 text-xs font-bold rounded-xl transition-all ${activeTab === 'bch' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 py-2.5 px-3 text-xs font-bold rounded-xl transition-all cursor-pointer ${activeTab === 'bch' ? 'bg-white text-red-600 shadow-md shadow-red-500/10' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Chi đoàn / Admin
             </button>
@@ -280,7 +289,7 @@ export default function LoginScreen() {
               <div className="text-center py-2">
                 <h2 className="text-base font-bold text-slate-800">Cổng đăng nhập Đoàn viên</h2>
                 <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                  Đoàn viên đăng nhập trực tiếp bằng <strong>Gmail cá nhân</strong>. Không cần sử dụng email sinh viên HCMUS.
+                  Đoàn viên đăng nhập trực tiếp bằng <strong className="text-slate-700">Gmail cá nhân</strong>. Không cần sử dụng email sinh viên HCMUS.
                 </p>
               </div>
 
@@ -288,7 +297,7 @@ export default function LoginScreen() {
                 type="button"
                 onClick={handleGoogleSignIn}
                 disabled={loading}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-xl font-bold text-xs transition active:scale-[0.98] disabled:opacity-70 flex justify-center items-center gap-2 shadow-md shadow-blue-500/20"
+                className="w-full bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-700 hover:via-rose-700 hover:to-red-700 text-white py-3.5 rounded-xl font-bold text-xs transition active:scale-[0.98] disabled:opacity-70 flex justify-center items-center gap-2.5 shadow-lg shadow-red-600/30 cursor-pointer"
               >
                 <svg className="w-4 h-4 bg-white rounded-full p-0.5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -299,7 +308,7 @@ export default function LoginScreen() {
                 Đăng nhập nhanh bằng Google
               </button>
 
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 text-[10px] text-slate-500 leading-normal">
+              <div className="bg-amber-50/90 p-3 rounded-xl border border-amber-200/60 text-[10px] text-amber-900 leading-normal">
                 💡 <strong>Lưu ý:</strong> Ở lần đăng nhập đầu tiên, hệ thống sẽ chỉ yêu cầu bạn nhập <strong>MSSV</strong> để tự động tìm kiếm và liên kết chính xác hồ sơ đã import.
               </div>
             </div>
@@ -308,7 +317,7 @@ export default function LoginScreen() {
               <div className="text-center py-1">
                 <h2 className="text-base font-bold text-slate-800">Cổng Quản lý Chi đoàn & Admin</h2>
                 <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                  Đăng nhập nhanh bằng <strong>Google</strong> để quản lý Chi đoàn của bạn.
+                  Đăng nhập nhanh bằng <strong className="text-slate-700">Google</strong> để quản lý Chi đoàn của bạn.
                 </p>
               </div>
 
@@ -316,7 +325,7 @@ export default function LoginScreen() {
                 type="button"
                 onClick={handleGoogleSignInForBranch}
                 disabled={loading}
-                className="w-full bg-[#1d4ed8] hover:bg-blue-800 text-white py-3.5 rounded-xl font-bold text-xs transition active:scale-[0.98] disabled:opacity-70 flex justify-center items-center gap-2 shadow-md shadow-blue-600/20"
+                className="w-full bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-700 hover:via-rose-700 hover:to-red-700 text-white py-3.5 rounded-xl font-bold text-xs transition active:scale-[0.98] disabled:opacity-70 flex justify-center items-center gap-2.5 shadow-lg shadow-red-600/30 cursor-pointer"
               >
                 <svg className="w-4 h-4 bg-white rounded-full p-0.5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -346,7 +355,7 @@ export default function LoginScreen() {
                       required
                       value={loginId}
                       onChange={(e) => setLoginId(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
                       placeholder="Ví dụ: 25dtv1.fetel, admin..."
                     />
                   </div>
@@ -355,7 +364,7 @@ export default function LoginScreen() {
                 <div>
                   <div className="flex justify-between items-end mb-1 ml-1">
                     <label className="block text-[11px] font-bold text-slate-500 uppercase">Mật khẩu</label>
-                    <button type="button" onClick={handlePasswordReset} className="text-[10px] text-blue-600 font-bold bg-transparent border-none cursor-pointer focus:outline-none p-0 flex items-center hover:text-blue-800">
+                    <button type="button" onClick={handlePasswordReset} className="text-[10px] text-red-600 font-bold bg-transparent border-none cursor-pointer focus:outline-none p-0 flex items-center hover:text-red-700 transition">
                       Quên mật khẩu?
                     </button>
                   </div>
@@ -369,7 +378,7 @@ export default function LoginScreen() {
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
+                      className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all text-xs text-slate-800 font-medium"
                       placeholder="••••••••"
                     />
                   </div>
@@ -378,7 +387,7 @@ export default function LoginScreen() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold uppercase tracking-wide text-xs drop-shadow-md hover:bg-slate-900 transition active:scale-[0.98] disabled:opacity-70 flex justify-center items-center gap-2 mt-2"
+                  className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold uppercase tracking-wide text-xs drop-shadow-md hover:bg-slate-800 transition active:scale-[0.98] disabled:opacity-70 flex justify-center items-center gap-2 mt-2 cursor-pointer"
                 >
                   {loading ? (
                     'Đang xử lý...'
@@ -393,7 +402,7 @@ export default function LoginScreen() {
           )}
         </div>
 
-        <div className="mt-8 text-center text-[9px] text-slate-400 shrink-0 opacity-80 leading-relaxed drop-shadow-sm pb-2">
+        <div className="mt-8 text-center text-[10px] text-slate-600 shrink-0 font-medium leading-relaxed drop-shadow-sm pb-2">
            &copy; {new Date().getFullYear()} Bản quyền thuộc về Đoàn khoa Điện tử - Viễn thông,<br/>Trường Đại học Khoa học tự nhiên, ĐHQG-HCM<br/>
            Công trình thanh niên nhiệm kỳ 2025 - 2027
         </div>
@@ -404,7 +413,7 @@ export default function LoginScreen() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
             <div className="text-center mb-5">
-              <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
+              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-inner">
                 <Users size={24} />
               </div>
               <h2 className="text-base font-bold text-slate-800">Chọn Chi đoàn Quản lý</h2>
@@ -428,7 +437,7 @@ export default function LoginScreen() {
                 <select
                   value={setupBranch}
                   onChange={(e) => setSetupBranch(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 text-xs text-slate-800 font-semibold cursor-pointer"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 text-xs text-slate-800 font-semibold cursor-pointer"
                 >
                   {branchOptions.map((b) => (
                     <option key={b} value={b}>
@@ -446,7 +455,7 @@ export default function LoginScreen() {
                       value={customSetupBranch}
                       onChange={(e) => setCustomSetupBranch(e.target.value)}
                       placeholder="Nhập tên Chi đoàn (VD: 27ICD1, 27DTV1...)"
-                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 text-xs text-slate-800"
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 text-xs text-slate-800"
                     />
                   </div>
                 )}
@@ -463,14 +472,14 @@ export default function LoginScreen() {
                     setPendingGoogleUser(null);
                     signOut(auth);
                   }}
-                  className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                  className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition cursor-pointer"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={setupLoading}
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition disabled:opacity-70 shadow-md shadow-blue-500/20"
+                  className="flex-1 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold transition disabled:opacity-70 shadow-md shadow-red-500/25 cursor-pointer"
                 >
                   {setupLoading ? 'Đang lưu...' : 'Xác nhận cấp quyền'}
                 </button>
