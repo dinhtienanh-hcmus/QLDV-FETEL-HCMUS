@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, orderBy, doc, getDoc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, doc, getDoc, setDoc, deleteDoc, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import QRCode from 'react-qr-code';
@@ -151,41 +151,93 @@ export default function ScanScreen() {
       try {
         // Fetch users map once for name/mssv lookup
         const usersSnap = await getDocs(collection(db, 'users'));
-        const userMapById = new Map<string, { name: string; mssv: string; branch: string }>();
+        const userMapById = new Map<string, { id: string; name: string; mssv: string; branch: string }>();
+        const userMapByMssv = new Map<string, { id: string; name: string; mssv: string; branch: string }>();
+        const userMapByUsername = new Map<string, { id: string; name: string; mssv: string; branch: string }>();
+        const userMapByEmail = new Map<string, { id: string; name: string; mssv: string; branch: string }>();
+
         usersSnap.forEach(uDoc => {
           const data = uDoc.data();
-          userMapById.set(uDoc.id, {
+          const rawMssv = (data.mssv || (uDoc.id.startsWith('profile_') ? uDoc.id.replace('profile_', '') : '') || '').toString().trim();
+          const info = {
+            id: uDoc.id,
             name: data.name || 'Đoàn viên',
-            mssv: data.mssv || '---',
+            mssv: rawMssv || '---',
             branch: data.branch || 'N/A'
-          });
+          };
+          userMapById.set(uDoc.id, info);
+
+          if (data.mssv) {
+            userMapByMssv.set(String(data.mssv).trim().toUpperCase(), info);
+          }
+          if (data.username) {
+            userMapByUsername.set(String(data.username).trim().toLowerCase(), info);
+          }
+          if (data.email) {
+            userMapByEmail.set(String(data.email).trim().toLowerCase(), info);
+          }
+          if (uDoc.id.startsWith('profile_')) {
+            const mKey = uDoc.id.replace('profile_', '').trim().toUpperCase();
+            if (mKey && !userMapByMssv.has(mKey)) {
+              userMapByMssv.set(mKey, info);
+            }
+          }
         });
 
         // Listen in real-time to registrations
         const regRef = collection(db, 'activities', selectedActivity, 'registrations');
         unsubReg = onSnapshot(regRef, async (regSnap) => {
-          const missingUserIds: string[] = [];
+          const missingLookupKeys: string[] = [];
           regSnap.forEach(rDoc => {
-            if (!userMapById.has(rDoc.id)) {
-              missingUserIds.push(rDoc.id);
+            const rData = rDoc.data();
+            const hasExisting = userMapById.has(rDoc.id) || 
+              (rData.userId && userMapById.has(rData.userId)) ||
+              (rDoc.id.startsWith('profile_') && userMapByMssv.has(rDoc.id.replace('profile_', '').trim().toUpperCase())) ||
+              (rData.mssv && userMapByMssv.has(String(rData.mssv).trim().toUpperCase()));
+            if (!hasExisting) {
+              missingLookupKeys.push(rDoc.id);
             }
           });
 
-          // Fetch any missing users dynamically to prevent desync of newly created accounts
-          if (missingUserIds.length > 0) {
-            const fetchPromises = missingUserIds.map(async (uid) => {
+          // Fetch any missing users dynamically to prevent desync
+          if (missingLookupKeys.length > 0) {
+            const fetchPromises = missingLookupKeys.map(async (key) => {
               try {
-                const uDoc = await getDoc(doc(db, 'users', uid));
+                // If it looks like a direct document ID
+                const uDoc = await getDoc(doc(db, 'users', key));
                 if (uDoc.exists()) {
                   const data = uDoc.data();
-                  userMapById.set(uid, {
+                  const rawM = (data.mssv || (uDoc.id.startsWith('profile_') ? uDoc.id.replace('profile_', '') : '') || '').toString().trim();
+                  const info = {
+                    id: uDoc.id,
                     name: data.name || 'Đoàn viên',
-                    mssv: data.mssv || '---',
+                    mssv: rawM || '---',
                     branch: data.branch || 'N/A'
-                  });
+                  };
+                  userMapById.set(key, info);
+                  if (rawM) userMapByMssv.set(rawM.toUpperCase(), info);
+                  return;
+                }
+
+                // If it is a profile placeholder whose placeholder was removed, query by mssv
+                const cleanM = key.startsWith('profile_') ? key.replace('profile_', '').trim() : key.trim();
+                if (/^\d+$/.test(cleanM)) {
+                  const qM = query(collection(db, 'users'), where('mssv', '==', cleanM));
+                  const snap = await getDocs(qM);
+                  if (!snap.empty) {
+                    const data = snap.docs[0].data();
+                    const info = {
+                      id: snap.docs[0].id,
+                      name: data.name || 'Đoàn viên',
+                      mssv: data.mssv || cleanM,
+                      branch: data.branch || 'N/A'
+                    };
+                    userMapById.set(key, info);
+                    userMapByMssv.set(cleanM.toUpperCase(), info);
+                  }
                 }
               } catch (e) {
-                console.error("Error fetching missing user:", uid, e);
+                console.error("Error fetching missing user:", key, e);
               }
             });
             await Promise.all(fetchPromises);
@@ -195,13 +247,66 @@ export default function ScanScreen() {
           regSnap.forEach(rDoc => {
             const rData = rDoc.data();
             if (rData.status === 'attended') {
-              const uInfo = userMapById.get(rDoc.id) || { name: 'Chưa cập nhật', mssv: '---', branch: '---' };
+              // Priority 1: Match by direct doc id or userId
+              let uInfo = userMapById.get(rDoc.id) || (rData.userId ? userMapById.get(rData.userId) : undefined);
+
+              // Priority 2: Match by profile_ mssv key
+              if (!uInfo && rDoc.id.startsWith('profile_')) {
+                const mssvFromDocId = rDoc.id.replace('profile_', '').trim().toUpperCase();
+                uInfo = userMapByMssv.get(mssvFromDocId) || userMapByUsername.get(mssvFromDocId.toLowerCase());
+              }
+
+              // Priority 3: Match by registration data MSSV
+              if (!uInfo && rData.mssv) {
+                const mssvFromData = String(rData.mssv).trim().toUpperCase();
+                uInfo = userMapByMssv.get(mssvFromData) || userMapByUsername.get(mssvFromData.toLowerCase());
+              }
+
+              // Priority 4: If rDoc.id itself is directly an MSSV
+              if (!uInfo) {
+                const cleanKey = rDoc.id.trim().toUpperCase();
+                uInfo = userMapByMssv.get(cleanKey) || userMapByUsername.get(cleanKey.toLowerCase());
+              }
+
+              // Priority 5: If email is in registration
+              if (!uInfo && rData.email) {
+                uInfo = userMapByEmail.get(String(rData.email).trim().toLowerCase());
+              }
+
+              // Resolve name: prefer user profile name, then registration doc name, then fallback
+              const resolvedName = (uInfo?.name && uInfo.name !== 'Đoàn viên' ? uInfo.name : rData.name) || uInfo?.name || rData.name || 'Đoàn viên';
+
+              // Resolve mssv: prefer user profile mssv, then rData.mssv, then rDoc.id if it has mssv pattern
+              let resolvedMssv = (uInfo?.mssv && uInfo.mssv !== '---' ? uInfo.mssv : rData.mssv) || uInfo?.mssv;
+              if (!resolvedMssv || resolvedMssv === '---') {
+                if (rDoc.id.startsWith('profile_')) {
+                  resolvedMssv = rDoc.id.replace('profile_', '').trim();
+                } else if (/^\d{7,10}$/.test(rDoc.id.trim())) {
+                  resolvedMssv = rDoc.id.trim();
+                } else {
+                  resolvedMssv = '---';
+                }
+              }
+
+              // Resolve branch: prefer user profile branch, then rData.branch
+              const resolvedBranch = (uInfo?.branch && uInfo.branch !== 'N/A' && uInfo.branch !== '---' ? uInfo.branch : rData.branch) || uInfo?.branch || rData.branch || '---';
+
+              // Auto-heal / backfill registration record in Firestore if missing fields
+              if (resolvedName && resolvedName !== 'Chưa cập nhật' && resolvedMssv && resolvedMssv !== '---' && (!rData.name || !rData.mssv || !rData.branch)) {
+                const regDocRef = doc(db, 'activities', selectedActivity, 'registrations', rDoc.id);
+                setDoc(regDocRef, {
+                  name: resolvedName,
+                  mssv: resolvedMssv,
+                  branch: resolvedBranch
+                }, { merge: true }).catch(console.error);
+              }
+
               list.push({
                 id: rDoc.id,
-                userId: rDoc.id,
-                name: uInfo.name,
-                mssv: uInfo.mssv,
-                branch: uInfo.branch,
+                userId: rData.userId || rDoc.id,
+                name: resolvedName,
+                mssv: resolvedMssv,
+                branch: resolvedBranch,
                 scannedAt: rData.scannedAt || Date.now()
               });
             }
@@ -266,22 +371,32 @@ export default function ScanScreen() {
       const userMapByMssv = new Map<string, { id: string; name: string; mssv: string; branch: string }>();
       usersSnap.forEach(uDoc => {
         const data = uDoc.data();
-        if (data.mssv) {
-          userMapByMssv.set(String(data.mssv).trim().toUpperCase(), {
-            id: uDoc.id,
-            name: data.name || 'Đoàn viên',
-            mssv: data.mssv,
-            branch: data.branch || 'N/A'
-          });
+        const m = (data.mssv || (uDoc.id.startsWith('profile_') ? uDoc.id.replace('profile_', '') : '') || '').toString().trim().toUpperCase();
+        const info = {
+          id: uDoc.id,
+          name: data.name || 'Đoàn viên',
+          mssv: m || data.mssv || '---',
+          branch: data.branch || 'N/A'
+        };
+        if (m) {
+          userMapByMssv.set(m, info);
+        }
+        if (data.username) {
+          userMapByMssv.set(String(data.username).trim().toUpperCase(), info);
         }
       });
 
-      // 2. Fetch existing attended user IDs
+      // 2. Fetch existing attended user IDs & MSSVs
       const regSnap = await getDocs(collection(db, 'activities', selectedActivity, 'registrations'));
       const attendedUserIds = new Set<string>();
+      const attendedMssvs = new Set<string>();
       regSnap.forEach(rDoc => {
-        if (rDoc.data().status === 'attended') {
+        const d = rDoc.data();
+        if (d.status === 'attended') {
           attendedUserIds.add(rDoc.id);
+          if (d.userId) attendedUserIds.add(d.userId);
+          if (d.mssv) attendedMssvs.add(String(d.mssv).trim().toUpperCase());
+          if (rDoc.id.startsWith('profile_')) attendedMssvs.add(rDoc.id.replace('profile_', '').trim().toUpperCase());
         }
       });
 
@@ -293,18 +408,23 @@ export default function ScanScreen() {
           continue;
         }
 
-        if (attendedUserIds.has(matchedUser.id)) {
+        const isAlreadyAttended = attendedUserIds.has(matchedUser.id) || attendedMssvs.has(mssv);
+        if (isAlreadyAttended) {
           alreadyAttendedCount++;
         } else {
           const regRef = doc(db, 'activities', selectedActivity, 'registrations', matchedUser.id);
           await setDoc(regRef, {
             userId: matchedUser.id,
+            name: matchedUser.name,
+            mssv: matchedUser.mssv !== '---' ? matchedUser.mssv : mssv,
+            branch: matchedUser.branch,
             status: 'attended',
             scannedAt: Date.now(),
             scannedBy: currentUser?.uid || 'admin'
           }, { merge: true });
           
           attendedUserIds.add(matchedUser.id);
+          attendedMssvs.add(mssv);
           successCount++;
         }
       }

@@ -232,7 +232,7 @@ export default function HomeScreen() {
           <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between min-w-[110px] px-3 shrink-0 bg-slate-50/80 py-2.5 rounded-2xl border border-slate-200/60">
             <div className="flex flex-col items-center w-full">
               <img 
-                src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                src={m.avatar || "/logo_doan.png"} 
                 alt={m.name} 
                 className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
               />
@@ -251,7 +251,7 @@ export default function HomeScreen() {
           <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between min-w-[110px] px-3 shrink-0 bg-slate-50/80 py-2.5 rounded-2xl border border-slate-200/60">
             <div className="flex flex-col items-center w-full">
               <img 
-                src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                src={m.avatar || "/logo_doan.png"} 
                 alt={m.name} 
                 className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
               />
@@ -272,7 +272,7 @@ export default function HomeScreen() {
               {btvList.map(m => (
                 <div key={m.id || m.mssv || m.name} className="flex flex-col items-center min-w-[105px] px-2 shrink-0">
                   <img 
-                    src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                    src={m.avatar || "/logo_doan.png"} 
                     alt={m.name} 
                     className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
                   />
@@ -295,7 +295,7 @@ export default function HomeScreen() {
               {uvBchList.map(m => (
                 <div key={m.id || m.mssv || m.name} className="flex flex-col items-center min-w-[105px] px-2 shrink-0">
                   <img 
-                    src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                    src={m.avatar || "/logo_doan.png"} 
                     alt={m.name} 
                     className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
                   />
@@ -316,7 +316,7 @@ export default function HomeScreen() {
           <div key={m.id || m.mssv || m.name} className="flex flex-col items-center justify-between min-w-[110px] px-3 shrink-0 bg-slate-50/80 py-2.5 rounded-2xl border border-slate-200/60">
             <div className="flex flex-col items-center w-full">
               <img 
-                src={m.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                src={m.avatar || "/logo_doan.png"} 
                 alt={m.name} 
                 className={`w-12 h-12 ${bgClass} rounded-full border-2 ${borderClass} object-cover shadow-xs`} 
               />
@@ -425,9 +425,17 @@ export default function HomeScreen() {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header Area */}
-      <div className="bg-[#1d4ed8] text-white p-6 pt-10 shrink-0 relative">
-        <div className="flex justify-between items-start">
+      {/* Header Area with vibrant red Đoàn thanh niên gradient & panorama watermark */}
+      <div 
+        className="relative text-white p-6 pt-10 shrink-0 overflow-hidden bg-cover bg-center shadow-lg shadow-red-950/20"
+        style={{ backgroundImage: `url('/background.webp')` }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-r from-red-700 via-red-600 to-rose-700 opacity-95 backdrop-blur-[1px]" />
+        {/* Soft decorative ambient lighting */}
+        <div className="absolute -top-10 -right-10 w-44 h-44 bg-white/20 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-8 -left-8 w-36 h-36 bg-black/25 rounded-full blur-xl pointer-events-none" />
+        
+        <div className="relative z-10 flex justify-between items-start">
           <div className="flex items-center gap-3">
             <div 
               className="relative group cursor-pointer shrink-0" 
@@ -435,33 +443,33 @@ export default function HomeScreen() {
               title="Đổi ảnh đại diện (như Facebook)"
             >
               <img 
-                src={currentUser?.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                src={currentUser?.avatar || "/logo_doan.png"} 
                 alt="Avatar" 
-                className="w-12 h-12 rounded-full border-2 border-white/80 object-cover shadow bg-blue-100" 
+                className="w-12 h-12 rounded-full border-2 border-white/80 object-cover shadow bg-red-100" 
               />
-              <div className="absolute bottom-0 right-0 bg-blue-600 text-white p-1 rounded-full border border-white shadow">
+              <div className="absolute bottom-0 right-0 bg-red-600 text-white p-1 rounded-full border border-white shadow">
                 <Camera size={10} />
               </div>
             </div>
             <div>
-              <div className="text-xs opacity-80 uppercase tracking-widest">Chào mừng bạn</div>
-              <div className="text-xl font-bold line-clamp-1">{displayName}</div>
-              <div className="text-[10px] bg-white/20 inline-block px-2 py-0.5 mt-1 rounded text-white flex items-center font-medium">
+              <div className="text-xs opacity-85 uppercase tracking-widest font-medium">Chào mừng bạn</div>
+              <div className="text-xl font-bold line-clamp-1 drop-shadow-sm">{displayName}</div>
+              <div className="text-[10px] bg-white/20 inline-block px-2.5 py-0.5 mt-1 rounded-full text-white flex items-center font-semibold backdrop-blur-sm border border-white/20">
                 {getRoleDisplay()}
               </div>
             </div>
           </div>
           <div className="flex gap-2 shrink-0">
-            <button onClick={() => setShowNotificationModal(true)} className="p-2 bg-white/20 rounded-full hover:bg-white/30 transition border-none cursor-pointer flex shrink-0">
+            <button onClick={() => setShowNotificationModal(true)} className="p-2 bg-white/20 rounded-full hover:bg-white/30 transition border-none cursor-pointer flex shrink-0" title="Thông báo">
               <Bell size={18} className="text-white" />
               {notifications.filter(n => !dismissedNotifs.includes(n.id)).length > 0 && (
-                <span className="absolute top-9 right-[100px] w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#1d4ed8]"></span>
+                <span className="absolute top-9 right-[100px] w-2.5 h-2.5 bg-yellow-400 rounded-full border-2 border-red-700"></span>
               )}
             </button>
             <button onClick={() => setShowPasswordModal(true)} className="p-2 bg-white/20 rounded-full hover:bg-white/30 transition border-none cursor-pointer flex shrink-0" title="Đổi mật khẩu">
               <KeyRound size={18} className="text-white" />
             </button>
-            <button onClick={logout} className="p-2 bg-white/20 rounded-full hover:bg-red-500/80 transition border-none cursor-pointer flex shrink-0" title="Đăng xuất">
+            <button onClick={logout} className="p-2 bg-white/20 rounded-full hover:bg-red-800/80 transition border-none cursor-pointer flex shrink-0" title="Đăng xuất">
               <LogOut size={18} className="text-white" />
             </button>
           </div>
@@ -805,11 +813,11 @@ export default function HomeScreen() {
             <div className="flex flex-col items-center py-2 space-y-4">
               <div className="relative group">
                 <img 
-                  src={previewAvatar || currentUser?.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                  src={previewAvatar || currentUser?.avatar || "/logo_doan.png"} 
                   alt="Avatar Preview" 
-                  className="w-28 h-28 rounded-full object-cover border-4 border-[#1d4ed8] shadow-md bg-slate-100"
+                  className="w-28 h-28 rounded-full object-cover border-4 border-red-600 shadow-md bg-slate-100"
                 />
-                <label className="absolute bottom-1 right-1 bg-[#1d4ed8] text-white p-2 rounded-full cursor-pointer hover:bg-blue-800 transition shadow-lg border-2 border-white">
+                <label className="absolute bottom-1 right-1 bg-red-600 text-white p-2 rounded-full cursor-pointer hover:bg-red-700 transition shadow-lg border-2 border-white">
                   <Camera size={16} />
                   <input 
                     type="file" 

@@ -55,17 +55,17 @@ function AppContent() {
   }
 
   return (
-    <div className="flex justify-center items-center h-screen w-full bg-slate-50 font-sans selection:bg-blue-200 overflow-hidden">
+    <div className="flex justify-center items-center h-screen w-full bg-slate-50 font-sans selection:bg-red-200 overflow-hidden">
       <div className="w-full h-full max-w-[1400px] flex flex-col md:flex-row bg-white relative overflow-hidden shadow-2xl">
         {/* Desktop Sidebar Navigation */}
         <div className="hidden md:flex w-64 bg-slate-900 border-r border-slate-800 flex-col py-6 shrink-0 z-20">
           <div className="px-6 mb-8 flex items-center">
             <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center p-1.5 shadow-lg mr-3">
-               <img src="https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png" alt="Logo" className="w-full h-full object-contain" />
+               <img src="/logo_doan.png" alt="Logo Đoàn" className="w-full h-full object-contain" />
             </div>
             <div>
               <h1 className="text-white font-bold text-lg leading-tight">FETEL@HCMUS</h1>
-              <p className="text-blue-200 text-[10px]">Hệ thống Quản lý Đoàn</p>
+              <p className="text-red-200 text-[10px]">Hệ thống Quản lý Đoàn</p>
             </div>
           </div>
 
@@ -137,7 +137,7 @@ function SidebarItem({ icon: Icon, label, isActive, onClick }: NavItemProps) {
     <button
       onClick={onClick}
       className={`flex items-center px-4 py-3 rounded-xl transition-all duration-200 border-none justify-start w-full cursor-pointer focus:outline-none ${
-        isActive ? 'bg-[#1d4ed8] text-white shadow-md' : 'bg-transparent text-slate-300 hover:text-white hover:bg-slate-800'
+        isActive ? 'bg-red-600 text-white shadow-md shadow-red-900/30' : 'bg-transparent text-slate-300 hover:text-white hover:bg-slate-800'
       }`}
     >
       <Icon size={20} strokeWidth={isActive ? 2.5 : 2} className="mr-3" />
@@ -153,7 +153,7 @@ function TabItem({ icon: Icon, label, isActive, onClick }: NavItemProps) {
     <button
       onClick={onClick}
       className={`flex-1 flex flex-col items-center justify-center py-1 transition-all duration-200 bg-transparent border-none cursor-pointer focus:outline-none ${
-        isActive ? 'text-[#1d4ed8]' : 'text-slate-300 hover:text-slate-400'
+        isActive ? 'text-red-600' : 'text-slate-300 hover:text-slate-400'
       }`}
     >
       <Icon size={20} strokeWidth={isActive ? 2.5 : 2} className="mb-1" />

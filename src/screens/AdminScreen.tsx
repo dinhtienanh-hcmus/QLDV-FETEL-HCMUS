@@ -2179,7 +2179,7 @@ export default function AdminScreen() {
                        }).map((u: any) => (
                           <div key={u.id} className="flex justify-between items-center p-3 bg-blue-50 border border-blue-100 rounded-lg">
                              <div className="flex items-center space-x-3">
-                                <img src={u.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} alt="avatar" className="w-8 h-8 rounded-full border border-slate-200 object-cover" />
+                                <img src={u.avatar || "/logo_doan.png"} alt="avatar" className="w-8 h-8 rounded-full border border-slate-200 object-cover" />
                                 <div>
                                    <div className="font-bold text-slate-800">{u.name} <span className="text-[10px] font-normal text-slate-500">({u.email || u.username})</span></div>
                                    <div className="text-[10px] text-slate-500 mt-0.5">
@@ -2719,7 +2719,7 @@ export default function AdminScreen() {
                      <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                        <div className="relative group shrink-0">
                          <img 
-                           src={bchForm.avatar || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                           src={bchForm.avatar || "/logo_doan.png"} 
                            alt="Avatar Preview" 
                            className="w-12 h-12 rounded-full object-cover border-2 border-blue-600 bg-white shadow-sm"
                          />

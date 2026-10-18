@@ -221,6 +221,9 @@ export default function QRScreen() {
       } else {
         await setDoc(regRef, {
           userId: currentUser!.uid,
+          name: currentUser!.name || displayName,
+          mssv: currentUser!.mssv || '',
+          branch: currentUser!.branch || '',
           status: 'attended',
           scannedAt: Date.now(),
           scannedBy: 'self_qr_scan'
@@ -441,7 +444,7 @@ export default function QRScreen() {
               <div className="flex items-center space-x-3.5 mb-4 relative z-10">
                 <div className="w-12 h-12 rounded-full bg-white/20 border-2 border-white/40 flex items-center justify-center overflow-hidden shrink-0 shadow">
                   <img 
-                    src={currentUser?.photoURL || "https://upload.wikimedia.org/wikipedia/vi/thumb/9/90/Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png/1200px-Huy_Hi%E1%BB%87u_%C4%90o%C3%A0n.png"} 
+                    src={currentUser?.photoURL || "/logo_doan.png"} 
                     alt="Avatar" 
                     className="w-full h-full object-cover" 
                   />
