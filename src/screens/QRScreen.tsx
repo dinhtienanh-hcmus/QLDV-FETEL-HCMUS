@@ -303,47 +303,57 @@ export default function QRScreen() {
       <div id="reader-stream-hidden" className="hidden"></div>
 
       {/* Header */}
-      <div className="bg-blue-800 text-white p-5 pt-8 shrink-0 shadow-md">
-        <div className="flex items-center space-x-2">
-          <Scan className="w-6 h-6 text-blue-200" />
-          <h2 className="text-lg font-bold">Cá nhân & Điểm danh</h2>
-        </div>
-        <p className="text-xs text-blue-100 opacity-80 mt-1">
-          Quét mã QR hoạt động Đoàn và Quản lý thông tin cá nhân
-        </p>
+      <div 
+        className="relative text-white p-5 pt-8 shrink-0 shadow-lg shadow-red-950/20 overflow-hidden bg-cover bg-center"
+        style={{ backgroundImage: `url('/background.webp')` }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-r from-red-700 via-red-600 to-rose-700 opacity-95 backdrop-blur-[1px]" />
+        {/* Soft decorative ambient lighting */}
+        <div className="absolute -top-10 -right-10 w-44 h-44 bg-white/20 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-8 -left-8 w-36 h-36 bg-black/25 rounded-full blur-xl pointer-events-none" />
 
-        {/* Tab Selector */}
-        <div className="flex bg-blue-900/60 p-1 rounded-xl mt-4 border border-blue-700/50">
-          <button
-            type="button"
-            onClick={() => {
-              stopCameraScanner();
-              setActiveTab('scan');
-            }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center space-x-1.5 cursor-pointer ${
-              activeTab === 'scan'
-                ? 'bg-white text-blue-900 shadow-sm'
-                : 'text-blue-200 hover:text-white'
-            }`}
-          >
-            <Camera size={15} />
-            <span>Quét mã điểm danh</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              stopCameraScanner();
-              setActiveTab('profile');
-            }}
-            className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center space-x-1.5 cursor-pointer ${
-              activeTab === 'profile'
-                ? 'bg-white text-blue-900 shadow-sm'
-                : 'text-blue-200 hover:text-white'
-            }`}
-          >
-            <User size={15} />
-            <span>Thông tin cá nhân</span>
-          </button>
+        <div className="relative z-10">
+          <div className="flex items-center space-x-2">
+            <Scan className="w-6 h-6 text-red-100" />
+            <h2 className="text-lg font-bold drop-shadow-sm">Cá nhân & Điểm danh</h2>
+          </div>
+          <p className="text-xs text-red-100 opacity-90 mt-1 font-medium">
+            Quét mã QR hoạt động Đoàn và Quản lý thông tin cá nhân
+          </p>
+
+          {/* Tab Selector */}
+          <div className="flex bg-red-950/40 p-1 rounded-xl mt-4 border border-white/20 backdrop-blur-sm">
+            <button
+              type="button"
+              onClick={() => {
+                stopCameraScanner();
+                setActiveTab('scan');
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center space-x-1.5 cursor-pointer ${
+                activeTab === 'scan'
+                  ? 'bg-white text-red-700 shadow-sm'
+                  : 'text-red-100 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Camera size={15} />
+              <span>Quét mã điểm danh</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                stopCameraScanner();
+                setActiveTab('profile');
+              }}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition flex items-center justify-center space-x-1.5 cursor-pointer ${
+                activeTab === 'profile'
+                  ? 'bg-white text-red-700 shadow-sm'
+                  : 'text-red-100 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <User size={15} />
+              <span>Thông tin cá nhân</span>
+            </button>
+          </div>
         </div>
       </div>
 

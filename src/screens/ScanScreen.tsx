@@ -481,14 +481,24 @@ export default function ScanScreen() {
   return (
     <div className="flex flex-col h-full bg-slate-50">
       {/* Header */}
-      <div className="bg-emerald-700 text-white p-5 pt-8 shrink-0 shadow-md">
-        <div className="flex items-center space-x-2">
-          <QrCode className="w-6 h-6 text-emerald-200" />
-          <h2 className="text-lg font-bold">Mã QR & Điểm danh Hoạt động</h2>
+      <div 
+        className="relative text-white p-5 pt-8 shrink-0 shadow-lg shadow-red-950/20 overflow-hidden bg-cover bg-center"
+        style={{ backgroundImage: `url('/background.webp')` }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-r from-red-700 via-red-600 to-rose-700 opacity-95 backdrop-blur-[1px]" />
+        {/* Soft decorative ambient lighting */}
+        <div className="absolute -top-10 -right-10 w-44 h-44 bg-white/20 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-8 -left-8 w-36 h-36 bg-black/25 rounded-full blur-xl pointer-events-none" />
+
+        <div className="relative z-10">
+          <div className="flex items-center space-x-2">
+            <QrCode className="w-6 h-6 text-red-100" />
+            <h2 className="text-lg font-bold drop-shadow-sm">Mã QR & Điểm danh Hoạt động</h2>
+          </div>
+          <p className="text-xs text-red-100 opacity-90 mt-1 font-medium">
+            Hỗ trợ mã QR tĩnh cực nhạy cho máy chiếu hội trường lớn hoặc mã bảo mật tự động đổi
+          </p>
         </div>
-        <p className="text-xs text-emerald-100 opacity-80 mt-1">
-          Hỗ trợ mã QR tĩnh cực nhạy cho máy chiếu hội trường lớn hoặc mã bảo mật tự động đổi
-        </p>
       </div>
 
       <div className="flex-1 p-4 md:p-6 space-y-6 overflow-y-auto pb-12">

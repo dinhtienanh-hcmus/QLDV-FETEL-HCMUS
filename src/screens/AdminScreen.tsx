@@ -1307,18 +1307,27 @@ export default function AdminScreen() {
 
   return (
     <div className="flex flex-col h-full bg-slate-50">
-      <div className="bg-slate-900 text-white p-6 pt-10 shrink-0">
-        <h2 className="text-lg font-bold">Quản lý Đoàn</h2>
-        <p className="text-[10px] opacity-70">
-          {isAdmin 
-            ? 'Duyệt hoạt động, gửi thông báo, quản lý Chi đoàn và tài khoản' 
-            : isBranch 
-              ? `Quản lý đoàn viên & Ban Chấp hành Chi đoàn ${currentUser?.branch || ''}` 
-              : 'Tạo hoạt động và báo cáo minh chứng'}
-        </p>
-        
-        {(isAdmin || isBranch) && (
-          <div className="mt-4 flex gap-2 border-b border-slate-700/50 pb-[-1px] overflow-x-auto no-scrollbar">
+      <div 
+        className="relative text-white p-6 pt-10 shrink-0 overflow-hidden bg-cover bg-center shadow-lg shadow-red-950/20"
+        style={{ backgroundImage: `url('/background.webp')` }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-r from-red-700 via-red-600 to-rose-700 opacity-95 backdrop-blur-[1px]" />
+        {/* Soft decorative ambient lighting */}
+        <div className="absolute -top-10 -right-10 w-44 h-44 bg-white/20 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-8 -left-8 w-36 h-36 bg-black/25 rounded-full blur-xl pointer-events-none" />
+
+        <div className="relative z-10">
+          <h2 className="text-lg font-bold drop-shadow-sm">Quản lý Đoàn</h2>
+          <p className="text-[11px] text-red-100 opacity-90 mt-0.5 font-medium">
+            {isAdmin 
+              ? 'Duyệt hoạt động, gửi thông báo, quản lý Chi đoàn và tài khoản' 
+              : isBranch 
+                ? `Quản lý đoàn viên & Ban Chấp hành Chi đoàn ${currentUser?.branch || ''}` 
+                : 'Tạo hoạt động và báo cáo minh chứng'}
+          </p>
+          
+          {(isAdmin || isBranch) && (
+            <div className="mt-4 flex gap-2 border-b border-white/20 pb-[-1px] overflow-x-auto no-scrollbar">
             <button 
               onClick={() => setActiveTab('activities')}
               className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'activities' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
@@ -1363,6 +1372,7 @@ export default function AdminScreen() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       <div className="flex-1 p-4 space-y-4 overflow-y-auto pb-10">
