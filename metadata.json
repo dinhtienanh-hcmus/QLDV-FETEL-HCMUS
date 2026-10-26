@@ -1,5 +1,5 @@
 {
-  "name": "Đoàn viên FETEL",
+  "name": "Sổ tay Đoàn viên",
   "description": "Ứng dụng quản lý Đoàn viên Khoa Điện tử - Viễn thông HCMUS",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
