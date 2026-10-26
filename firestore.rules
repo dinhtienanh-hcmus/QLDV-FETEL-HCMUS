@@ -75,6 +75,29 @@ service cloud.firestore {
              data.order is number;
     }
 
+    function isValidYouthIdea(data) {
+      return data.keys().hasAll(['userId', 'authorName', 'title', 'category', 'solutionProposal', 'status', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 256 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 512 &&
+             data.category is string && data.category.size() >= 1 && data.category.size() <= 128 &&
+             data.solutionProposal is string && data.solutionProposal.size() >= 1 && data.solutionProposal.size() <= 16384 &&
+             data.status is string && data.status in ['pending', 'approved', 'implemented', 'featured', 'rejected'] &&
+             data.createdAt is number && data.updatedAt is number;
+    }
+
+    function isValidTnttApplication(data) {
+      return data.keys().hasAll(['userId', 'applicantType', 'awardLevel', 'fullName', 'branch', 'primaryCategory', 'status', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.applicantType is string && data.applicantType in ['individual', 'collective'] &&
+             data.awardLevel is string && data.awardLevel in ['truong', 'tieubieu'] &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 256 &&
+             data.branch is string && data.branch.size() >= 1 && data.branch.size() <= 128 &&
+             data.primaryCategory is string && data.primaryCategory.size() >= 1 && data.primaryCategory.size() <= 128 &&
+             data.status is string && data.status in ['pending', 'approved_faculty', 'proposed_exemplary', 'needs_revision', 'rejected'] &&
+             data.createdAt is number && data.updatedAt is number;
+    }
+
     // --- Collections ---
 
     match /system/{docId} {
@@ -111,6 +134,29 @@ service cloud.firestore {
       allow create: if isAdmin() && isValidId(topicId) && isValidHandbookTopic(incoming());
       allow update: if isAdmin() && isValidHandbookTopic(incoming());
       allow delete: if isAdmin();
+    }
+
+    match /youth_ideas/{ideaId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(ideaId) && isValidYouthIdea(incoming()) && isOwner(incoming().userId);
+      allow update: if isSignedIn() && isValidYouthIdea(incoming()) && (
+        isAdmin() ||
+        isBranchManager() ||
+        isOwner(existing().userId) ||
+        incoming().diff(existing()).affectedKeys().hasOnly(['upvotes', 'upvotedBy', 'updatedAt'])
+      );
+      allow delete: if isAdmin() || isOwner(existing().userId);
+    }
+
+    match /tntt_applications/{applicationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(applicationId) && isValidTnttApplication(incoming()) && isOwner(incoming().userId);
+      allow update: if isSignedIn() && isValidTnttApplication(incoming()) && (
+        isAdmin() ||
+        isBranchManager() ||
+        isOwner(existing().userId)
+      );
+      allow delete: if isAdmin() || isOwner(existing().userId);
     }
 
     match /activities/{activityId} {

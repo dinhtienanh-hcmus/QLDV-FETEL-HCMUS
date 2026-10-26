@@ -17,6 +17,7 @@
     },
     "bch_member": {
       "title": "BCH Member",
+      "description": "Executive committee member profile",
       "type": "object",
       "properties": {
         "name": { "type": "string" },
@@ -63,6 +64,7 @@
     },
     "notification": {
       "title": "Notification",
+      "description": "System notification message",
       "type": "object",
       "properties": {
         "title": { "type": "string" },
@@ -74,6 +76,7 @@
     },
     "handbook_topic": {
       "title": "Handbook Topic",
+      "description": "Knowledge handbook article",
       "type": "object",
       "properties": {
         "title": { "type": "string" },
@@ -81,6 +84,60 @@
         "order": { "type": "number" }
       },
       "required": ["title", "content", "order"]
+    },
+    "youth_idea": {
+      "title": "Youth Idea",
+      "description": "Creative idea or initiative submitted by union members",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "mssv": { "type": "string" },
+        "branch": { "type": "string" },
+        "email": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "problemStatement": { "type": "string" },
+        "solutionProposal": { "type": "string" },
+        "expectedImpact": { "type": "string" },
+        "attachmentLink": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["pending", "approved", "implemented", "featured", "rejected"] },
+        "adminFeedback": { "type": "string" },
+        "upvotes": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "authorName", "title", "category", "solutionProposal", "status", "createdAt", "updatedAt"]
+    },
+    "tntt_application": {
+      "title": "TNTT Application",
+      "description": "Application for Thanh niên tiên tiến làm theo lời Bác & Tập thể tiên tiến làm theo lời Bác",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "applicantType": { "type": "string", "enum": ["individual", "collective"] },
+        "awardLevel": { "type": "string", "enum": ["truong", "tieubieu"] },
+        "personRole": { "type": "string", "enum": ["sinhvien", "canbogiangvien"] },
+        "fullName": { "type": "string" },
+        "mssv": { "type": "string" },
+        "branch": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "unionRating": { "type": "string" },
+        "uncleHoPracticeWork": { "type": "string" },
+        "drlScore": { "type": "string" },
+        "drlEvidenceLink": { "type": "string" },
+        "gpaScore": { "type": "string" },
+        "gpaEvidenceLink": { "type": "string" },
+        "primaryCategory": { "type": "string" },
+        "folderEvidenceLink": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved_faculty", "proposed_exemplary", "needs_revision", "rejected"] },
+        "reviewerNote": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "applicantType", "awardLevel", "fullName", "branch", "primaryCategory", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -107,6 +164,14 @@
     "/handbook_topics/{topicId}": {
       "schema": { "$ref": "#/entities/handbook_topic" },
       "description": "Handbook topics"
+    },
+    "/youth_ideas/{ideaId}": {
+      "schema": { "$ref": "#/entities/youth_idea" },
+      "description": "Creative ideas and initiatives contributed by union members"
+    },
+    "/tntt_applications/{applicationId}": {
+      "schema": { "$ref": "#/entities/tntt_application" },
+      "description": "Applications for Thanh niên tiên tiến làm theo lời Bác"
     }
   }
 }
