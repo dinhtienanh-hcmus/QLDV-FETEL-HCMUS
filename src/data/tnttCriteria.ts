@@ -8,8 +8,8 @@ export interface CriterionItem {
   textPlaceholder?: string;
   requiresFileLink?: boolean;
   fileLinkLabel?: string;
-  highlightNote?: boolean; // Nhắc nhở tô vàng tên cá nhân trong danh sách đính kèm
-  onlyForExemplary?: boolean; // Chỉ áp dụng hoặc nâng mức cho hệ Tiêu biểu
+  highlightNote?: boolean;
+  onlyForExemplary?: boolean;
 }
 
 export interface CategoryCriteriaGroup {
@@ -21,22 +21,57 @@ export interface CategoryCriteriaGroup {
   criteria: CriterionItem[];
 }
 
-export const TNTT_DOCUMENT_INFO = {
+export interface TimelineMilestone {
+  label: string;
+  time: string;
+}
+
+export interface TnttDocumentInfo {
+  title: string;
+  number: string;
+  date: string;
+  issuer: string;
+  regulation: string;
+  achievementPeriod: string;
+  generalNote: string;
+  pdfUrl: string;
+  minDrlScore: number;
+  minGpaTruong: number;
+  minGpaTieuBieu: number;
+  maxWordsUncleHoWork: number;
+  timeline: TimelineMilestone[];
+  steps: string[];
+}
+
+export interface TnttConfigData {
+  docInfo: TnttDocumentInfo;
+  individualGroups: CategoryCriteriaGroup[];
+  collectiveCriteria: CriterionItem[];
+  updatedAt?: number;
+}
+
+export const TNTT_DOCUMENT_INFO: TnttDocumentInfo = {
+  title: 'Xét chọn Danh hiệu “Thanh niên tiên tiến làm theo lời Bác” & “Tập thể tiên tiến làm theo lời Bác”',
   number: '180-TB/ĐTN',
   date: '25/12/2025',
   issuer: 'BCH Đoàn Trường Đại học Khoa học tự nhiên, ĐHQG-HCM',
   regulation: 'Quyết định số 102-QĐ/ĐTN ngày 25/12/2025 của Ban Thường vụ Đoàn Trường nhiệm kỳ 2025 – 2027',
   achievementPeriod: 'Tất cả các thành tích xét trao được tính từ ngày 01/01/2025 đến ngày 31/12/2025',
+  generalNote: 'File scan quyết định giải thưởng phải gồm quyết định và danh sách đính kèm có tô vàng tên của cá nhân/tập thể.',
   pdfUrl: '/assets/aistudio/180-TB-_TN_ea853e8b.pdf',
+  minDrlScore: 85,
+  minGpaTruong: 7.0,
+  minGpaTieuBieu: 8.0,
+  maxWordsUncleHoWork: 100,
   timeline: [
-    { label: 'Cá nhân, tập thể đăng ký & Đoàn cơ sở thẩm tra', time: 'Đến hết ngày 25/01/2026' },
+    { label: 'Đoàn viên & Chi đoàn đăng ký, Đoàn khoa thẩm tra', time: 'Đến hết ngày 25/01/2026' },
     { label: 'Thời gian thẩm định hồ sơ cấp Trường', time: '26/01 – 01/02/2026' },
     { label: 'Thời gian họp Hội đồng xét chọn', time: '02/02 – 06/02/2026' },
     { label: 'Thời gian dự kiến công bố kết quả', time: 'Tháng 02/2026' },
   ],
   steps: [
-    'Bước 1: Cá nhân, tập thể nộp hồ sơ đăng ký xét chọn về Đoàn khoa Điện tử - Viễn thông (sinh viên nộp tại Đoàn khoa nơi học tập; cán bộ, giảng viên nộp tại Đoàn khối Cán bộ trẻ).',
-    'Bước 2: Đoàn khoa theo dõi, tổng hợp và thẩm định trước hồ sơ các cá nhân, tập thể đăng ký xét chọn danh hiệu.',
+    'Bước 1: Đoàn viên (nộp hồ sơ Cá nhân) và BCH Chi đoàn (nộp hồ sơ Tập thể) kê khai tiêu chuẩn và đính kèm minh chứng về Đoàn khoa Điện tử - Viễn thông.',
+    'Bước 2: BCH Đoàn khoa Điện tử - Viễn thông theo dõi, tổng hợp và thẩm định hồ sơ của các cá nhân, tập thể.',
     'Bước 3: Đoàn khoa gửi công văn đề nghị xét chọn các danh hiệu và đề xuất các cá nhân, tập thể tiêu biểu về Ban Thường vụ Đoàn Trường.',
   ],
 };
@@ -47,7 +82,7 @@ export const INDIVIDUAL_CATEGORY_GROUPS: CategoryCriteriaGroup[] = [
     name: 'Lĩnh vực Học tập - Sáng tạo - Nghiên cứu khoa học',
     shortName: 'Học tập - Sáng tạo - NCKH',
     badge: '🎓',
-    note: 'Đạt ít nhất 01 trong các tiêu chuẩn bên dưới (Hệ Tiêu biểu yêu cầu thêm ĐTB học tập từ 8.0 trở lên và tích lũy đủ tín chỉ)',
+    note: 'Đạt ít nhất 01 trong các tiêu chuẩn bên dưới (Hệ Tiêu biểu yêu cầu thêm ĐTB học tập từ 8.0 trở lên và tích lũy đủ tín chỉ theo tiến độ)',
     criteria: [
       {
         id: 'ht_1',
@@ -74,8 +109,8 @@ export const INDIVIDUAL_CATEGORY_GROUPS: CategoryCriteriaGroup[] = [
       {
         id: 'ht_3',
         code: 'TC 3',
-        content: 'Có ít nhất 01 bài báo khoa học, hoặc công trình nghiên cứu khoa học được đăng tải trên các báo, tạp chí khoa học cấp trường trở lên (Đối với CB/GV trẻ xét Tiêu biểu: tham gia ít nhất 01 công trình NCKH cấp trường trở lên và nghiệm thu đạt loại Khá trở lên).',
-        evidenceRequirement: 'File scan bài báo/công trình nghiên cứu khoa học được đăng tải/công nhận (kèm quyết định nghiệm thu nếu có).',
+        content: 'Có ít nhất 01 bài báo khoa học, hoặc công trình nghiên cứu khoa học được đăng tải trên các báo, tạp chí khoa học cấp trường trở lên.',
+        evidenceRequirement: 'File scan bài báo/công trình nghiên cứu khoa học được đăng tải/công nhận.',
         requiresText: true,
         textPlaceholder: 'Ghi rõ tên bài báo/công trình NCKH, nơi đăng tải/công bố, vai trò tác giả...',
         requiresFileLink: true,
@@ -227,7 +262,7 @@ export const INDIVIDUAL_CATEGORY_GROUPS: CategoryCriteriaGroup[] = [
       {
         id: 'vk_1',
         code: 'TC 1',
-        content: 'Có hoàn cảnh đặc biệt khó khăn nhưng vẫn đảm bảo việc học tập tốt (Hệ Tiêu biểu ưu tiên các học sinh, sinh viên khuyết tật, gia đình không trọn vẹn có nghị lực vươn lên).',
+        content: 'Có hoàn cảnh đặc biệt khó khăn nhưng vẫn đảm bảo việc học tập tốt (Hệ Tiêu biểu ưu tiên các sinh viên khuyết tật, gia đình không trọn vẹn có nghị lực vươn lên).',
         evidenceRequirement: 'Khai hồ sơ không quá 200 chữ. (Không cần minh chứng đối với cấp Trường; kèm Minh chứng về hoàn cảnh gia đình đối với hệ Tiêu biểu).',
         requiresText: true,
         maxWords: 200,
@@ -381,10 +416,10 @@ export const INDIVIDUAL_CATEGORY_GROUPS: CategoryCriteriaGroup[] = [
   },
   {
     id: 'dangvientre',
-    name: 'Đối tượng Đảng viên trẻ',
+    name: 'Đối tượng Đảng viên trẻ (Sinh viên)',
     shortName: 'Đảng viên trẻ',
     badge: '🚩',
-    note: 'Dành cho Đảng viên trẻ đang sinh hoạt tại các Chi bộ trực thuộc Đảng bộ Trường ĐH KHTN, ĐHQG-HCM',
+    note: 'Dành cho sinh viên là Đảng viên trẻ đang sinh hoạt tại Chi bộ Sinh viên trực thuộc Đảng bộ Trường',
     criteria: [
       {
         id: 'dvt_1',
@@ -392,7 +427,7 @@ export const INDIVIDUAL_CATEGORY_GROUPS: CategoryCriteriaGroup[] = [
         content: 'Là Đảng viên trẻ đang sinh hoạt tại các Chi bộ trực thuộc Đảng bộ Trường Đại học Khoa học tự nhiên, ĐHQG-HCM (Hệ Tiêu biểu: Là Đảng viên được tuyên dương từ cấp Đảng ủy trường trở lên).',
         evidenceRequirement: 'Khai chi bộ đang sinh hoạt (Hệ Tiêu biểu kèm File scan quyết định giải thưởng/bằng khen/giấy khen có tô vàng tên cá nhân).',
         requiresText: true,
-        textPlaceholder: 'Ghi rõ tên Chi bộ đang sinh hoạt (VD: Chi bộ Sinh viên 1)...',
+        textPlaceholder: 'Ghi rõ tên Chi bộ đang sinh hoạt (VD: Chi bộ Sinh viên)...',
         requiresFileLink: true,
         fileLinkLabel: 'Link File scan PDF Quyết định tuyên dương cấp Đảng ủy trường trở lên (nếu xét Tiêu biểu)',
         highlightNote: true,
@@ -417,41 +452,11 @@ export const INDIVIDUAL_CATEGORY_GROUPS: CategoryCriteriaGroup[] = [
       {
         id: 'dvt_4',
         code: 'TC 4',
-        content: 'Thực hiện tốt việc học tập và làm theo tư tưởng, đạo đức, phong cách Hồ Chí Minh trong quá trình học tập, làm việc và công tác.',
+        content: 'Thực hiện tốt việc học tập và làm theo tư tưởng, đạo đức, phong cách Hồ Chí Minh trong quá trình học tập và rèn luyện.',
         evidenceRequirement: 'Khai hồ sơ không quá 100 chữ - Liệt kê các hoạt động đã tham gia/tổ chức thuộc nội dung. Không cần minh chứng.',
         requiresText: true,
         maxWords: 100,
         textPlaceholder: 'Khai cụ thể việc thực hiện học tập và làm theo lời Bác (không quá 100 chữ)...',
-      },
-    ],
-  },
-  {
-    id: 'canbotre_gv',
-    name: 'Đối tượng Cán bộ trẻ / Giáo viên, Giảng viên trẻ',
-    shortName: 'Cán bộ / Giảng viên trẻ',
-    badge: '👩‍🏫',
-    note: 'Dành cho Cán bộ trẻ, Giáo viên, Giảng viên trẻ dưới 35 tuổi đang công tác tại trường',
-    criteria: [
-      {
-        id: 'cbgv_1',
-        code: 'TC 1',
-        content: 'Có nhiều đóng góp tích cực trong lĩnh vực công tác / học tập, sáng tạo, nghiên cứu khoa học và giảng dạy (Hệ Tiêu biểu: Đạt danh hiệu "Cán bộ trẻ tiêu biểu" hoặc "Nhà giáo trẻ tiêu biểu" Trường ĐH KHTN ở lần xét gần nhất, hoặc có sáng kiến/bài báo khoa học được công nhận).',
-        evidenceRequirement: 'Khai hồ sơ không quá 100 chữ (Hệ Tiêu biểu kèm File scan quyết định công nhận danh hiệu/sáng kiến/bài báo khoa học).',
-        requiresText: true,
-        maxWords: 100,
-        textPlaceholder: 'Liệt kê các đóng góp chuyên môn, giảng dạy, NCKH, sáng kiến (không quá 100 chữ)...',
-        requiresFileLink: true,
-        fileLinkLabel: 'Link File scan PDF Quyết định danh hiệu / Sáng kiến / Bài báo khoa học (nếu có)',
-        highlightNote: true,
-      },
-      {
-        id: 'cbgv_2',
-        code: 'TC 2',
-        content: 'Tham gia và đóng góp tích cực cho các hoạt động phong trào của Công Đoàn trường, Đoàn khối, Chi Đoàn Cán bộ trẻ đơn vị công tác và hỗ trợ các hoạt động chung của Đoàn - Hội các cấp.',
-        evidenceRequirement: 'Khai hồ sơ không quá 100 chữ - Liệt kê các hoạt động đã tham gia/tổ chức thuộc nội dung. Không cần minh chứng.',
-        requiresText: true,
-        maxWords: 100,
-        textPlaceholder: 'Liệt kê các hoạt động phong trào và hỗ trợ Đoàn - Hội đã tham gia (không quá 100 chữ)...',
       },
     ],
   },
@@ -496,7 +501,7 @@ export const COLLECTIVE_CRITERIA_ITEMS: CriterionItem[] = [
     evidenceRequirement: 'Khai hồ sơ không quá 100 chữ - Không cần minh chứng.',
     requiresText: true,
     maxWords: 100,
-    textPlaceholder: 'Mô tả công trình, phần việc thanh niên làm theo lời Bác của tập thể (không quá 100 chữ)...',
+    textPlaceholder: 'Mô tả công trình, phần việc thanh niên làm theo lời Bác của Chi đoàn (không quá 100 chữ)...',
   },
   {
     id: 'tt_rieng_1',
@@ -505,7 +510,7 @@ export const COLLECTIVE_CRITERIA_ITEMS: CriterionItem[] = [
     evidenceRequirement: 'Khai hồ sơ không quá 100 chữ - Không cần minh chứng.',
     requiresText: true,
     maxWords: 100,
-    textPlaceholder: 'Mô tả mô hình, giải pháp sáng tạo của đơn vị (không quá 100 chữ)...',
+    textPlaceholder: 'Mô tả mô hình, giải pháp sáng tạo của Chi đoàn (không quá 100 chữ)...',
   },
   {
     id: 'tt_rieng_2',
@@ -519,11 +524,11 @@ export const COLLECTIVE_CRITERIA_ITEMS: CriterionItem[] = [
   {
     id: 'tt_rieng_3',
     code: 'TC Riêng 3',
-    content: 'Có tổ chức vận động, bình chọn, tuyên dương và giới thiệu các điển hình tiêu biểu, phát huy hệ thống các Danh hiệu tiêu biểu: Sinh viên 5 tốt các cấp, Thanh niên tiên tiến các cấp, Cán bộ trẻ tiêu biểu, Đảng viên trẻ tiêu biểu...',
+    content: 'Có tổ chức vận động, bình chọn, tuyên dương và giới thiệu các điển hình tiêu biểu, phát huy hệ thống các Danh hiệu tiêu biểu: Sinh viên 5 tốt các cấp, Thanh niên tiên tiến các cấp, Đảng viên trẻ tiêu biểu...',
     evidenceRequirement: 'Khai hồ sơ không quá 100 chữ - Không cần minh chứng.',
     requiresText: true,
     maxWords: 100,
-    textPlaceholder: 'Khai hoạt động tuyên dương, nhân rộng điển hình tại đơn vị (không quá 100 chữ)...',
+    textPlaceholder: 'Khai hoạt động tuyên dương, nhân rộng điển hình tại Chi đoàn (không quá 100 chữ)...',
   },
   {
     id: 'tt_rieng_4',
@@ -532,7 +537,7 @@ export const COLLECTIVE_CRITERIA_ITEMS: CriterionItem[] = [
     evidenceRequirement: 'Khai hồ sơ không quá 100 chữ - Không cần minh chứng.',
     requiresText: true,
     maxWords: 100,
-    textPlaceholder: 'Khai kết quả thực hiện cuộc vận động trên fanpage/trang thông tin đơn vị (không quá 100 chữ)...',
+    textPlaceholder: 'Khai kết quả thực hiện cuộc vận động trên trang thông tin/mạng xã hội (không quá 100 chữ)...',
   },
   {
     id: 'tt_rieng_5',
@@ -541,28 +546,34 @@ export const COLLECTIVE_CRITERIA_ITEMS: CriterionItem[] = [
     evidenceRequirement: 'Khai hồ sơ không quá 100 chữ - Không cần minh chứng.',
     requiresText: true,
     maxWords: 100,
-    textPlaceholder: 'Khai kết quả triển khai chương trình Rèn luyện Đoàn viên tại đơn vị (không quá 100 chữ)...',
+    textPlaceholder: 'Khai kết quả triển khai chương trình Rèn luyện Đoàn viên tại Chi đoàn (không quá 100 chữ)...',
   },
   {
     id: 'tt_rieng_6',
     code: 'TC Riêng 6',
     content: 'Tập thể được giới thiệu xét trao Danh hiệu "Tập thể tiên tiến làm theo lời Bác" phải có ít nhất 01 cá nhân được giới thiệu xét trao Danh hiệu "Thanh niên tiên tiến làm theo lời Bác" năm được xét trao.',
-    evidenceRequirement: 'Căn cứ công văn giới thiệu của Đoàn cơ sở - Ghi rõ thông tin cá nhân tiêu biểu của tập thể.',
+    evidenceRequirement: 'Căn cứ công văn giới thiệu của Đoàn cơ sở - Ghi rõ thông tin cá nhân tiêu biểu của Chi đoàn.',
     requiresText: true,
-    textPlaceholder: 'Nhập Họ tên và MSSV của ít nhất 01 cá nhân thuộc tập thể cùng được giới thiệu xét trao...',
+    textPlaceholder: 'Nhập Họ tên và MSSV của ít nhất 01 Đoàn viên thuộc Chi đoàn cùng được giới thiệu xét trao...',
   },
   {
     id: 'tt_tieubieu_5',
     code: 'TC Tiêu biểu',
-    content: '(Nếu đăng ký xét Tập thể Tiêu biểu): Được nhận khen thưởng trong công tác Đoàn và phong trào thanh niên trong năm học gần nhất từ Giấy khen của BCH Đoàn trường trở lên (đối với Chi Đoàn, CLB trực thuộc Đoàn cơ sở) hoặc Giấy khen Ban Cán sự Đoàn ĐHQG-HCM trở lên (đối với Đoàn cơ sở).',
+    content: '(Nếu đăng ký xét Tập thể Tiêu biểu): Được nhận khen thưởng trong công tác Đoàn và phong trào thanh niên trong năm học gần nhất từ Giấy khen của BCH Đoàn trường trở lên.',
     evidenceRequirement: 'File scan quyết định về giải thưởng (gồm quyết định và danh sách đính kèm có tô vàng tên tập thể)/bằng khen/giấy khen.',
     requiresText: true,
-    textPlaceholder: 'Ghi rõ danh hiệu khen thưởng công tác Đoàn của tập thể...',
+    textPlaceholder: 'Ghi rõ danh hiệu khen thưởng công tác Đoàn của Chi đoàn...',
     requiresFileLink: true,
     fileLinkLabel: 'Link File scan PDF Quyết định khen thưởng / Giấy khen tập thể',
     highlightNote: true,
   },
 ];
+
+export const DEFAULT_TNTT_CONFIG: TnttConfigData = {
+  docInfo: TNTT_DOCUMENT_INFO,
+  individualGroups: INDIVIDUAL_CATEGORY_GROUPS,
+  collectiveCriteria: COLLECTIVE_CRITERIA_ITEMS,
+};
 
 export function countWords(text: string): number {
   if (!text || !text.trim()) return 0;

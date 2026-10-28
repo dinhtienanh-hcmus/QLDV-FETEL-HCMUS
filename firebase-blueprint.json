@@ -44,6 +44,8 @@
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
         "planLink": { "type": "string" },
         "evidenceLink": { "type": "string" },
+        "allowBranchScan": { "type": "boolean" },
+        "allowedScanBranches": { "type": "string" },
         "creatorId": { "type": "string" },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" }

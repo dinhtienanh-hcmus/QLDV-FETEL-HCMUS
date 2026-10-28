@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, where } from 'firebase/firestore';
 import { db, firebaseConfig } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink, QrCode } from 'lucide-react';
 import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
@@ -39,6 +39,8 @@ interface Activity {
   otherCooperators?: string;
   branches?: string[];
   activityType?: string;
+  allowBranchScan?: boolean;
+  allowedScanBranches?: string[];
 }
 
 export default function AdminScreen() {
@@ -64,6 +66,17 @@ export default function AdminScreen() {
   const [imageUrl, setImageUrl] = useState('');
   const [semester, setSemester] = useState(1);
   const [academicYear, setAcademicYear] = useState('2026-2027');
+
+  // Ủy quyền cho Chi đoàn điểm danh / mở mã QR đối với hoạt động Đoàn khoa
+  const [allowBranchScan, setAllowBranchScan] = useState(true);
+  const [scanBranchScope, setScanBranchScope] = useState<'all' | 'custom'>('all');
+  const [allowedScanBranches, setAllowedScanBranches] = useState<string[]>([]);
+
+  // Modal cấu hình quyền điểm danh cho hoạt động đã tạo
+  const [editingScanPermAct, setEditingScanPermAct] = useState<Activity | null>(null);
+  const [permAllowBranchScan, setPermAllowBranchScan] = useState(true);
+  const [permScanScope, setPermScanScope] = useState<'all' | 'custom'>('all');
+  const [permScanBranches, setPermScanBranches] = useState<string[]>([]);
 
   const isAdmin = currentUser?.role === 'admin';
   const isBranch = currentUser?.role === 'chidoan';
@@ -710,8 +723,16 @@ export default function AdminScreen() {
       
       const filteredActs = acts.filter(a => {
         if (isAdmin) return true;
-        const matchesBranch = a.branch === currentUser?.branch || (a.branches && a.branches.includes(currentUser?.branch || ''));
-        return a.creatorId === currentUser?.uid || matchesBranch;
+        const userBranch = currentUser?.branch || '';
+        const matchesBranch = a.branch === userBranch || (a.branches && a.branches.includes(userBranch));
+        const isAuthorizedScan = Boolean(
+          a.allowBranchScan &&
+          (!a.allowedScanBranches ||
+            a.allowedScanBranches.length === 0 ||
+            a.allowedScanBranches.includes('all') ||
+            (userBranch && a.allowedScanBranches.includes(userBranch)))
+        );
+        return a.creatorId === currentUser?.uid || matchesBranch || isAuthorizedScan;
       });
       
       setActivities(filteredActs);
@@ -792,6 +813,10 @@ export default function AdminScreen() {
         description,
         imageUrl,
         activityType: activityType || 'tructiep',
+        allowBranchScan: isAdmin ? allowBranchScan : true,
+        allowedScanBranches: isAdmin
+          ? (allowBranchScan ? (scanBranchScope === 'all' ? ['all'] : allowedScanBranches) : [])
+          : [currentUser?.branch || 'all'],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -814,6 +839,9 @@ export default function AdminScreen() {
       setDescription('');
       setImageUrl('');
       setActivityType('tructiep');
+      setAllowBranchScan(true);
+      setScanBranchScope('all');
+      setAllowedScanBranches([]);
       setOrganizerDetails([]);
       setIsCooperating(false);
       setCooperatingBranches([]);
@@ -821,6 +849,43 @@ export default function AdminScreen() {
       fetchActivities();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const openScanPermModal = (act: Activity) => {
+    setEditingScanPermAct(act);
+    const isAllowed = Boolean(act.allowBranchScan);
+    setPermAllowBranchScan(isAllowed);
+    if (act.allowedScanBranches && act.allowedScanBranches.length > 0 && !act.allowedScanBranches.includes('all')) {
+      setPermScanScope('custom');
+      setPermScanBranches(act.allowedScanBranches);
+    } else {
+      setPermScanScope('all');
+      setPermScanBranches([]);
+    }
+  };
+
+  const handleSaveScanPerm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingScanPermAct || !isAdmin) return;
+    if (permAllowBranchScan && permScanScope === 'custom' && permScanBranches.length === 0) {
+      alert('Vui lòng chọn ít nhất 01 Chi đoàn được phép điểm danh, hoặc chọn "Tất cả Chi đoàn"!');
+      return;
+    }
+    try {
+      const updatedBranches = permAllowBranchScan
+        ? (permScanScope === 'all' ? ['all'] : permScanBranches)
+        : [];
+      await updateDoc(doc(db, 'activities', editingScanPermAct.id), {
+        allowBranchScan: permAllowBranchScan,
+        allowedScanBranches: updatedBranches,
+        updatedAt: Date.now()
+      });
+      setEditingScanPermAct(null);
+      fetchActivities();
+    } catch (err) {
+      console.error('Lỗi cập nhật quyền điểm danh:', err);
+      alert('Không thể cập nhật quyền điểm danh cho Chi đoàn.');
     }
   };
 
@@ -1641,6 +1706,77 @@ export default function AdminScreen() {
                 )}
               </select>
             </div>
+
+            {isAdmin && (
+              <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200 space-y-2.5">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500"
+                    checked={allowBranchScan}
+                    onChange={e => setAllowBranchScan(e.target.checked)}
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                      <QrCode size={14} className="text-emerald-700" />
+                      Cho phép các Chi đoàn mở mã QR & quét điểm danh hoạt động này
+                    </span>
+                    <span className="text-[10px] text-emerald-700 block mt-0.5">
+                      Khi bật, tài khoản các Chi đoàn có thể chọn hoạt động này trong mục "Điểm danh HĐ" để chiếu mã QR hoặc quét/nhập MSSV điểm danh.
+                    </span>
+                  </div>
+                </label>
+
+                {allowBranchScan && (
+                  <div className="pt-2 border-t border-emerald-200/70 space-y-2 pl-6">
+                    <div className="flex flex-wrap gap-3 text-xs font-semibold text-slate-700">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="createScanScope"
+                          checked={scanBranchScope === 'all'}
+                          onChange={() => setScanBranchScope('all')}
+                          className="text-emerald-600"
+                        />
+                        <span>Tất cả Chi đoàn</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="createScanScope"
+                          checked={scanBranchScope === 'custom'}
+                          onChange={() => setScanBranchScope('custom')}
+                          className="text-emerald-600"
+                        />
+                        <span>Chỉ một số Chi đoàn được chọn</span>
+                      </label>
+                    </div>
+
+                    {scanBranchScope === 'custom' && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2.5 rounded-lg border border-emerald-200">
+                        {branches.map(b => (
+                          <label key={b.id} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer font-medium">
+                            <input
+                              type="checkbox"
+                              className="rounded text-emerald-600 h-3.5 w-3.5"
+                              checked={allowedScanBranches.includes(b.name)}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setAllowedScanBranches([...allowedScanBranches, b.name]);
+                                } else {
+                                  setAllowedScanBranches(allowedScanBranches.filter(item => item !== b.name));
+                                }
+                              }}
+                            />
+                            <span>{b.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             
             <div className="flex justify-between items-center mt-2">
               <button type="button" onClick={downloadXlsxTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-2 py-1 rounded">
@@ -1663,10 +1799,13 @@ export default function AdminScreen() {
            ) : (
              <div className="space-y-3">
                {activities.map(act => {
+                 const isOwnBranchAct = act.creatorId === currentUser?.uid || act.branch === currentUser?.branch || (act.branches && act.branches.includes(currentUser?.branch || ''));
                  const isOverdue = Date.now() > act.endTime;
-                 const needsEvidence = isBranch && isOverdue && !act.evidenceLink && act.status === 'approved';
+                 const needsEvidence = isBranch && isOwnBranchAct && isOverdue && !act.evidenceLink && act.status === 'approved';
                  const overdueDays = isOverdue ? Math.floor((Date.now() - act.endTime) / 86400000) : 0;
                  const warning = needsEvidence && overdueDays > 3;
+
+                 const isAllBranchesAllowed = act.allowBranchScan && (!act.allowedScanBranches || act.allowedScanBranches.length === 0 || act.allowedScanBranches.includes('all'));
 
                  return (
                  <div key={act.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
@@ -1679,10 +1818,22 @@ export default function AdminScreen() {
                      <p className="text-[9px] text-slate-500 font-semibold mb-0.5">HK{act.semester} - {act.academicYear}</p>
                      <p className="text-[9px] text-slate-500 mb-0.5">Bắt đầu: {formatDateToDDMMYYYY(act.startTime)}</p>
                      <p className="text-[9px] text-slate-500 mb-1">Kết thúc: {formatDateToDDMMYYYY(act.endTime)}</p>
-                     <div className="flex gap-2 text-[9px] mb-2 font-medium">
+                     <div className="flex flex-wrap gap-1.5 text-[9px] mb-2 font-medium">
                        <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">TG: +{act.pointsParticipant}đ</span>
                        <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">BTC: +{act.pointsOrganizer}đ</span>
-                       <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{act.targetAudience === 'all' ? 'Toàn khoa' : 'Nội bộ'}</span>
+                       <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{act.targetAudience === 'all' ? 'Toàn khoa' : `Chi đoàn ${act.targetAudience}`}</span>
+                       {act.allowBranchScan ? (
+                         <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
+                           <QrCode size={10} />
+                           {isAllBranchesAllowed
+                             ? 'Cho phép tất cả Chi đoàn điểm danh QR'
+                             : `Cho phép Chi đoàn điểm danh: ${(act.allowedScanBranches || []).join(', ')}`}
+                         </span>
+                       ) : (
+                         <span className="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-semibold">
+                           Chỉ đơn vị tạo / Đoàn khoa điểm danh
+                         </span>
+                       )}
                      </div>
                      {act.planLink && (
                        <a href={act.planLink} target="_blank" rel="noreferrer" className="text-[10px] text-blue-600 underline truncate block max-w-[200px] mb-2">Xem kế hoạch</a>
@@ -1703,16 +1854,30 @@ export default function AdminScreen() {
                    <div className="flex justify-between items-center border-t border-slate-100 mt-2 pt-2 gap-2">
                       <div className="flex flex-wrap gap-2">
                         {isAdmin && act.status === 'pending' && (
-                          <button onClick={() => handleApprove(act.id, act.name, act.targetAudience)} className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold flex items-center">
+                          <button onClick={() => handleApprove(act.id, act.name, act.targetAudience)} className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold flex items-center cursor-pointer">
                             <Check size={12} className="mr-0.5" /> Duyệt
                           </button>
                         )}
-                        {isBranch && (
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => openScanPermModal(act)}
+                            className={`px-2.5 py-1 rounded text-[10px] font-bold border flex items-center gap-1 cursor-pointer transition ${
+                              act.allowBranchScan
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                            }`}
+                          >
+                            <QrCode size={12} />
+                            <span>{act.allowBranchScan ? 'Cấu hình Chi đoàn điểm danh' : 'Cho phép Chi đoàn điểm danh'}</span>
+                          </button>
+                        )}
+                        {isBranch && isOwnBranchAct && (
                           <button onClick={() => RequestTimeEdit(act.id)} className="bg-slate-100 text-slate-700 px-2 py-1 rounded text-[10px] font-bold border border-slate-200">
                              Sửa TG
                           </button>
                         )}
-                        {isBranch && act.status === 'approved' && isOverdue && (
+                        {isBranch && isOwnBranchAct && act.status === 'approved' && isOverdue && (
                            <button onClick={() => updateEvidence(act.id, act.evidenceLink)} className={`px-2 py-1 rounded text-[10px] font-bold border ${act.evidenceLink ? 'bg-slate-50 text-slate-600 border-slate-200' : 'bg-blue-50 text-blue-700 border-blue-200'}`}>
                              {act.evidenceLink ? 'Sửa minh chứng' : '+ Nộp minh chứng'}
                            </button>
@@ -1724,9 +1889,11 @@ export default function AdminScreen() {
                         )}
                       </div>
                       
-                      <button onClick={() => handleDelete(act.id)} className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg shrink-0">
-                        <Trash2 size={14} />
-                      </button>
+                      {(isAdmin || isOwnBranchAct) && (
+                        <button onClick={() => handleDelete(act.id)} className="p-1.5 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg shrink-0">
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                    </div>
                  </div>
                  );
@@ -2989,6 +3156,118 @@ export default function AdminScreen() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {editingScanPermAct && isAdmin && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-md shadow-xl border border-slate-100">
+            <div className="flex justify-between items-start mb-3 pb-2.5 border-b border-slate-100">
+              <div>
+                <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                  <QrCode size={16} className="text-emerald-600" />
+                  Ủy quyền Chi đoàn điểm danh QR
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1 font-medium">
+                  Hoạt động: {editingScanPermAct.name}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingScanPermAct(null)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveScanPerm} className="space-y-4">
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500"
+                  checked={permAllowBranchScan}
+                  onChange={e => setPermAllowBranchScan(e.target.checked)}
+                />
+                <div>
+                  <span className="text-xs font-bold text-emerald-950 block">
+                    Cho phép các Chi đoàn mở mã QR & điểm danh hoạt động này
+                  </span>
+                  <span className="text-[10px] text-emerald-700 block mt-0.5">
+                    Các Chi đoàn được chọn sẽ thấy hoạt động này trong tab "Điểm danh HĐ" để chiếu mã QR, quét mã hoặc nhập MSSV điểm danh.
+                  </span>
+                </div>
+              </label>
+
+              {permAllowBranchScan && (
+                <div className="space-y-2.5">
+                  <label className="text-[11px] font-bold text-slate-700 block">
+                    Phạm vi Chi đoàn được phép điểm danh:
+                  </label>
+                  <div className="flex gap-4 text-xs font-semibold text-slate-700">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="modalScanScope"
+                        checked={permScanScope === 'all'}
+                        onChange={() => setPermScanScope('all')}
+                        className="text-emerald-600"
+                      />
+                      <span>Tất cả Chi đoàn</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="modalScanScope"
+                        checked={permScanScope === 'custom'}
+                        onChange={() => setPermScanScope('custom')}
+                        className="text-emerald-600"
+                      />
+                      <span>Chọn Chi đoàn cụ thể</span>
+                    </label>
+                  </div>
+
+                  {permScanScope === 'custom' && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 max-h-48 overflow-y-auto">
+                      {branches.map(b => (
+                        <label key={b.id} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer font-medium">
+                          <input
+                            type="checkbox"
+                            className="rounded text-emerald-600 h-3.5 w-3.5"
+                            checked={permScanBranches.includes(b.name)}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setPermScanBranches([...permScanBranches, b.name]);
+                              } else {
+                                setPermScanBranches(permScanBranches.filter(item => item !== b.name));
+                              }
+                            }}
+                          />
+                          <span>{b.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingScanPermAct(null)}
+                  className="flex-1 py-2.5 rounded-xl font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 text-xs transition cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 text-xs shadow-md transition cursor-pointer"
+                >
+                  Lưu phân quyền
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

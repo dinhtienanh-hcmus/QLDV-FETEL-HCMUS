@@ -150,11 +150,10 @@ service cloud.firestore {
 
     match /tntt_applications/{applicationId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(applicationId) && isValidTnttApplication(incoming()) && isOwner(incoming().userId);
+      allow create: if isSignedIn() && isValidId(applicationId) && isValidTnttApplication(incoming()) && isOwner(incoming().userId) && incoming().status == 'pending';
       allow update: if isSignedIn() && isValidTnttApplication(incoming()) && (
         isAdmin() ||
-        isBranchManager() ||
-        isOwner(existing().userId)
+        (isOwner(existing().userId) && incoming().status == 'pending')
       );
       allow delete: if isAdmin() || isOwner(existing().userId);
     }

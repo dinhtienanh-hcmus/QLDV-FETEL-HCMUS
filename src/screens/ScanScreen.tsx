@@ -31,6 +31,9 @@ interface Activity {
   branch?: string;
   branches?: string[];
   creatorId?: string;
+  allowBranchScan?: boolean;
+  allowedScanBranches?: string[];
+  status?: string;
 }
 
 interface AttendedStudent {
@@ -71,8 +74,10 @@ export default function ScanScreen() {
   const [attendedList, setAttendedList] = useState<AttendedStudent[]>([]);
   const [loadingAttended, setLoadingAttended] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [onlyMyBranchFilter, setOnlyMyBranchFilter] = useState(false);
 
   const { currentUser } = useAuth();
+  const isBranchUser = currentUser?.role === 'chidoan';
 
   // 1. Real-time activities listener
   useEffect(() => {
@@ -86,7 +91,8 @@ export default function ScanScreen() {
         if (currentUser?.role === 'admin') {
           return true;
         }
-        // Tài khoản Chi đoàn: chỉ chọn các hoạt động do Chi đoàn mình tổ chức / dành cho Chi đoàn
+        // Tài khoản Chi đoàn: chọn các hoạt động do Chi đoàn mình tổ chức / dành cho Chi đoàn
+        // HOẶC các hoạt động do Đoàn khoa tạo và ủy quyền cho Chi đoàn điểm danh (allowBranchScan)
         const userBranch = currentUser?.branch;
         if (!userBranch) return false;
 
@@ -94,8 +100,15 @@ export default function ScanScreen() {
                                   (Array.isArray(a.branches) && a.branches.includes(userBranch));
         const isTargetBranch = a.targetAudience === userBranch;
         const isCreator = a.creatorId === currentUser?.uid;
+        const isAuthorizedByDoanKhoa = Boolean(
+          a.allowBranchScan &&
+          (!a.allowedScanBranches ||
+            a.allowedScanBranches.length === 0 ||
+            a.allowedScanBranches.includes('all') ||
+            a.allowedScanBranches.includes(userBranch))
+        );
 
-        return isBranchOrganizer || isTargetBranch || isCreator;
+        return isBranchOrganizer || isTargetBranch || isCreator || isAuthorizedByDoanKhoa;
       });
       
       setActivities(filtered);
@@ -459,11 +472,18 @@ export default function ScanScreen() {
 
   const currentActivityObj = activities.find(a => a.id === selectedActivity);
 
-  const filteredAttendedList = attendedList.filter(item => 
-    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.mssv.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.branch.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredAttendedList = attendedList.filter(item => {
+    if (isBranchUser && onlyMyBranchFilter && currentUser?.branch) {
+      if (item.branch.trim().toLowerCase() !== currentUser.branch.trim().toLowerCase()) {
+        return false;
+      }
+    }
+    return (
+      item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.mssv.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.branch.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   const qrPayload = selectedActivity 
     ? qrMode === 'static'
@@ -514,11 +534,15 @@ export default function ScanScreen() {
             onChange={e => setSelectedActivity(e.target.value)}
           >
             <option value="" disabled>-- Chọn hoạt động --</option>
-            {activities.map(act => (
-              <option key={act.id} value={act.id}>
-                {act.name} ({act.targetAudience === 'all' ? 'Toàn khoa' : `Chi đoàn ${act.targetAudience}`})
-              </option>
-            ))}
+            {activities.map(act => {
+              const isDoanKhoaAct = act.branch === 'admin' || act.branch === 'Đoàn khoa ĐTVT' || (!act.branch && act.targetAudience === 'all');
+              return (
+                <option key={act.id} value={act.id}>
+                  {isDoanKhoaAct && isBranchUser ? '[Đoàn khoa ủy quyền] ' : ''}
+                  {act.name} ({act.targetAudience === 'all' ? 'Toàn khoa' : `Chi đoàn ${act.targetAudience}`})
+                </option>
+              );
+            })}
           </select>
 
           {currentActivityObj && (
@@ -526,6 +550,11 @@ export default function ScanScreen() {
               <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg font-medium border border-emerald-100">
                 Đối tượng: {currentActivityObj.targetAudience === 'all' ? 'Toàn khoa' : `Chi đoàn ${currentActivityObj.targetAudience}`}
               </span>
+              {currentActivityObj.allowBranchScan && (
+                <span className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg font-bold border border-blue-200">
+                  📲 Đoàn khoa cho phép Chi đoàn mở mã QR & điểm danh
+                </span>
+              )}
               {currentActivityObj.location && (
                 <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg font-medium">
                   📍 {currentActivityObj.location}
@@ -806,11 +835,27 @@ export default function ScanScreen() {
         {/* Attended Students List Table */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center space-x-2">
-              <Users size={18} className="text-emerald-600" />
-              <h3 className="font-bold text-slate-800 text-sm">
-                Danh sách tham gia ({attendedList.length} sinh viên)
-              </h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center space-x-2">
+                <Users size={18} className="text-emerald-600" />
+                <h3 className="font-bold text-slate-800 text-sm">
+                  Danh sách tham gia ({filteredAttendedList.length}/{attendedList.length} sinh viên)
+                </h3>
+              </div>
+
+              {isBranchUser && currentUser?.branch && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyMyBranchFilter(prev => !prev)}
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer ${
+                    onlyMyBranchFilter
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {onlyMyBranchFilter ? `Đang lọc: Chi đoàn ${currentUser.branch}` : `Chỉ xem Chi đoàn ${currentUser.branch}`}
+                </button>
+              )}
             </div>
 
             <div className="relative w-full md:w-64">
