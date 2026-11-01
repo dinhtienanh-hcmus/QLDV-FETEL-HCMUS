@@ -1,7 +1,7 @@
 import { Bell, LogOut, CalendarCheck2, KeyRound, X, CheckCircle2, Camera, Upload } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { db, auth } from '../lib/firebase';
+import { db, auth, isQuotaExceededError } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, orderBy, getDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
 import { isTermExpired, formatDateToDDMMYYYY } from '../utils/termUtils';
@@ -74,6 +74,7 @@ export default function HomeScreen() {
   };
 
   const [bchMembers, setBchMembers] = useState<any[]>([]);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
@@ -120,6 +121,12 @@ export default function HomeScreen() {
   const displayName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Người dùng';
 
   useEffect(() => {
+    try {
+      const cachedBch = localStorage.getItem('cached_bch_members');
+      if (cachedBch) setBchMembers(JSON.parse(cachedBch));
+      const cachedActs = localStorage.getItem(`cached_home_acts_${currentUser?.uid || 'guest'}`);
+      if (cachedActs) setCampaigns(JSON.parse(cachedActs));
+    } catch {}
     fetchBchMembers();
     fetchActivities();
     fetchNotifications();
@@ -127,6 +134,27 @@ export default function HomeScreen() {
 
   const fetchBchMembers = async () => {
     try {
+      // 1. First read single lightweight summary doc `system/bch_cache` (1 read instead of scanning all users)
+      const cacheDocRef = doc(db, 'system', 'bch_cache');
+      try {
+        const cacheSnap = await getDoc(cacheDocRef);
+        if (cacheSnap.exists() && Array.isArray(cacheSnap.data().members) && cacheSnap.data().members.length > 0) {
+          const cachedList = cacheSnap.data().members;
+          setBchMembers(cachedList);
+          setQuotaExceeded(false);
+          try {
+            localStorage.setItem('cached_bch_members', JSON.stringify(cachedList));
+          } catch {}
+          return;
+        }
+      } catch (cacheErr) {
+        if (isQuotaExceededError(cacheErr)) {
+          setQuotaExceeded(true);
+          return;
+        }
+      }
+
+      // 2. Fallback if system/bch_cache does not exist yet: scan once and populate system/bch_cache
       const q = query(collection(db, 'users'));
       const snapshot = await getDocs(q);
       const allUsers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
@@ -191,8 +219,19 @@ export default function HomeScreen() {
       );
 
       setBchMembers(bch);
+      setQuotaExceeded(false);
+      try {
+        localStorage.setItem('cached_bch_members', JSON.stringify(bch));
+        if (bch.length > 0) {
+          await setDoc(cacheDocRef, { members: bch, updatedAt: Date.now() }, { merge: true });
+        }
+      } catch {}
     } catch (e) {
-      console.error(e);
+      if (isQuotaExceededError(e)) {
+        setQuotaExceeded(true);
+      } else {
+        console.warn("Error fetching BCH members:", e);
+      }
     }
   };
 
@@ -341,7 +380,9 @@ export default function HomeScreen() {
       const notifs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Notification));
       setNotifications(notifs);
     } catch (err) {
-      console.error(err);
+      if (!isQuotaExceededError(err)) {
+        console.warn("Error fetching notifications:", err);
+      }
     }
   };
 
@@ -363,20 +404,32 @@ export default function HomeScreen() {
 
       // Check attendance status for each activity
       const finalized = await Promise.all(visibleActs.map(async act => {
-         const regRef = doc(db, 'activities', act.id, 'registrations', currentUser.uid);
-         const regSnap = await getDoc(regRef);
-         const regData = regSnap.exists() ? regSnap.data() : null;
-         const isAttended = regData?.status === 'attended';
-         return { 
-           ...act, 
-           attended: !!isAttended, 
-           scannedAt: regData?.scannedAt 
-         };
+         try {
+           const regRef = doc(db, 'activities', act.id, 'registrations', currentUser.uid);
+           const regSnap = await getDoc(regRef);
+           const regData = regSnap.exists() ? regSnap.data() : null;
+           const isAttended = regData?.status === 'attended';
+           return { 
+             ...act, 
+             attended: !!isAttended, 
+             scannedAt: regData?.scannedAt 
+           };
+         } catch {
+           return { ...act, attended: false };
+         }
       }));
       
       setCampaigns(finalized);
+      setQuotaExceeded(false);
+      try {
+        localStorage.setItem(`cached_home_acts_${currentUser.uid}`, JSON.stringify(finalized));
+      } catch {}
     } catch (err) {
-      console.error(err);
+      if (isQuotaExceededError(err)) {
+        setQuotaExceeded(true);
+      } else {
+        console.warn("Error fetching activities:", err);
+      }
     }
   };
 
@@ -477,6 +530,16 @@ export default function HomeScreen() {
       </div>
 
         <div className="flex-1 p-4 space-y-4 overflow-y-auto no-scrollbar pb-10">
+          {quotaExceeded && (
+            <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 text-amber-900 shadow-xs">
+              <div className="text-xs font-extrabold flex items-center gap-1.5 text-amber-800">
+                <span>⏳</span> Dữ liệu của bạn vẫn an toàn 100% — Đang chờ Google reset hạn mức đọc trong ngày
+              </div>
+              <p className="text-[11px] text-amber-800/90 mt-1 leading-relaxed">
+                Toàn bộ dữ liệu (Đoàn viên, Chi đoàn, Hoạt động, BCH) vẫn còn nguyên trên máy chủ Firestore, <strong>không bị xóa hay mất dữ liệu</strong>. Do hạn mức đọc miễn phí hằng ngày của Google Firebase tính theo múi giờ Thái Bình Dương (00:00 PT), hệ thống sẽ tự động mở lại lượt đọc vào lúc <strong>14:00 chiều nay (giờ Việt Nam)</strong>.
+              </p>
+            </div>
+          )}
           {notifications.filter(n => !dismissedNotifs.includes(n.id)).length > 0 && (
             <div className="mb-4">
               <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Thông báo mới</h3>

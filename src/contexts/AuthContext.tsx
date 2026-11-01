@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User as FirebaseUser, onAuthStateChanged, signOut, updateEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { auth, db, isQuotaExceededError } from '../lib/firebase';
 
 interface AppUser extends FirebaseUser {
   role?: 'admin' | 'chidoan' | 'doanvien';
@@ -39,29 +39,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com'];
+        const userEmailLower = firebaseUser.email?.toLowerCase() || '';
+        const isDefaultAdmin = adminEmails.includes(userEmailLower);
+
+        const isBranchAccount =
+          userEmailLower.endsWith('@chidoan.fetel') ||
+          userEmailLower.includes('chidoan') ||
+          userEmailLower.endsWith('.fetel');
+
+        const getBranchFromEmail = (email: string) => {
+          if (!email) return 'Chi đoàn';
+          const prefix = email.split('@')[0].toLowerCase();
+          const clean = prefix.replace('.fetel', '').replace('chidoan', '').replace(/^[._-]+|[._-]+$/g, '');
+          if (!clean) return 'Chi đoàn';
+          return clean.toUpperCase();
+        };
+
+        const extractedBranch = isBranchAccount ? getBranchFromEmail(userEmailLower) : '';
+        const cacheKey = `cached_user_profile_${firebaseUser.uid}`;
+
         // Fetch user data from Firestore
         try {
           const userDocRef = doc(db, 'users', firebaseUser.uid);
           const userDocSnap = await getDoc(userDocRef);
-          
-          const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com'];
-          const userEmailLower = firebaseUser.email?.toLowerCase() || '';
-          const isDefaultAdmin = adminEmails.includes(userEmailLower);
-          
-          const isBranchAccount = 
-            userEmailLower.endsWith('@chidoan.fetel') || 
-            userEmailLower.includes('chidoan') ||
-            userEmailLower.endsWith('.fetel');
-
-          const getBranchFromEmail = (email: string) => {
-            if (!email) return 'Chi đoàn';
-            const prefix = email.split('@')[0].toLowerCase();
-            let clean = prefix.replace('.fetel', '').replace('chidoan', '').replace(/^[._-]+|[._-]+$/g, '');
-            if (!clean) return 'Chi đoàn';
-            return clean.toUpperCase();
-          };
-
-          const extractedBranch = isBranchAccount ? getBranchFromEmail(userEmailLower) : '';
           
           let appUser: AppUser = firebaseUser;
           
@@ -100,6 +101,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               avatar: data.avatar || firebaseUser.photoURL || undefined,
             };
 
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify({
+                role: appUser.role,
+                branch: appUser.branch,
+                mssv: appUser.mssv,
+                name: appUser.name,
+                committeeRole: appUser.committeeRole,
+                branchRole: appUser.branchRole,
+                committeeTerm: appUser.committeeTerm,
+                avatar: appUser.avatar,
+              }));
+            } catch {}
+
             // Sync database profile if needed for admin or branch account
             if ((isDefaultAdmin && data.role !== 'admin') || (isBranchAccount && (data.role !== 'chidoan' || data.branch !== defaultBranch))) {
               await setDoc(userDocRef, {
@@ -120,15 +134,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             if (mssvFromEmail) {
-              const profileRef = doc(db, 'users', `profile_${mssvFromEmail}`);
+              const cleanMssv = mssvFromEmail.toLowerCase();
+              const profileRef = doc(db, 'users', `profile_${cleanMssv}`);
               const profileSnap = await getDoc(profileRef);
               if (profileSnap.exists()) {
                 matchedProfile = profileSnap.data();
                 try {
                   await deleteDoc(profileRef);
-                } catch (e) {
-                  console.error(e);
-                }
+                } catch {}
               }
             }
 
@@ -140,11 +153,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ? (extractedBranch || matchedProfile?.branch || 'Chi đoàn')
               : (matchedProfile?.branch || 'Đoàn khoa ĐTVT');
 
+            const rawProfileName = (matchedProfile?.name || '').trim();
+            const profileHasQuestion = rawProfileName.includes('?');
+            const cleanDisplayName = firebaseUser.displayName && !firebaseUser.displayName.includes('?') ? firebaseUser.displayName.trim() : '';
+
             const defaultName = isDefaultAdmin 
               ? 'BCH Đoàn khoa ĐTVT' 
               : isBranchAccount
               ? `BCH Chi đoàn ${defaultBranchName}`
-              : (matchedProfile?.name || firebaseUser.displayName || userEmailLower.split('@')[0] || 'Đoàn viên');
+              : (!profileHasQuestion && rawProfileName ? rawProfileName : (cleanDisplayName || rawProfileName || userEmailLower.split('@')[0] || 'Đoàn viên'));
 
             const defaultCommitteeRole = isBranchAccount ? 'Chi đoàn' : (matchedProfile?.committeeRole || '');
 
@@ -170,14 +187,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 mssv: newUserData.mssv,
                 avatar: firebaseUser.photoURL || undefined,
               };
+              localStorage.setItem(cacheKey, JSON.stringify({
+                role: appUser.role,
+                branch: appUser.branch,
+                mssv: appUser.mssv,
+                name: appUser.name,
+                avatar: appUser.avatar,
+              }));
             } catch (err) {
-              console.error("Error creating user profile:", err);
+              if (!isQuotaExceededError(err)) {
+                console.warn("Error creating user profile:", err);
+              }
             }
           }
           setCurrentUser(appUser);
         } catch (error) {
-          console.error("Error fetching user data", error);
-          setCurrentUser(firebaseUser as AppUser);
+          if (!isQuotaExceededError(error)) {
+            console.warn("Error fetching user data:", error);
+          }
+          let cachedData: any = null;
+          try {
+            const raw = localStorage.getItem(cacheKey);
+            if (raw) cachedData = JSON.parse(raw);
+          } catch {}
+
+          const fallbackRole: 'admin' | 'chidoan' | 'doanvien' =
+            isDefaultAdmin ? 'admin' : isBranchAccount ? 'chidoan' : (cachedData?.role || 'doanvien');
+          const fallbackBranch =
+            cachedData?.branch || (isBranchAccount ? (extractedBranch || 'Chi đoàn') : 'Đoàn khoa ĐTVT');
+          const fallbackName =
+            cachedData?.name ||
+            (isDefaultAdmin
+              ? 'BCH Đoàn khoa ĐTVT'
+              : isBranchAccount
+              ? `BCH Chi đoàn ${fallbackBranch}`
+              : (firebaseUser.displayName || 'Đoàn viên'));
+
+          setCurrentUser({
+            ...firebaseUser,
+            role: fallbackRole,
+            branch: fallbackBranch,
+            mssv: cachedData?.mssv || '',
+            name: fallbackName,
+            committeeRole: cachedData?.committeeRole || '',
+            branchRole: cachedData?.branchRole || '',
+            committeeTerm: cachedData?.committeeTerm || '',
+            avatar: cachedData?.avatar || firebaseUser.photoURL || undefined,
+          });
         }
       } else {
         setCurrentUser(null);
@@ -196,7 +252,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!auth.currentUser) return;
     const userDocRef = doc(db, 'users', auth.currentUser.uid);
     const userEmailLower = auth.currentUser.email?.toLowerCase() || '';
-    const adminEmails = ['dkdtvt.hcmus@gmail.com'];
+    const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com'];
     const isDefaultAdmin = adminEmails.includes(userEmailLower);
 
     let newEmail = auth.currentUser.email || '';
@@ -220,6 +276,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     await setDoc(userDocRef, updatedData, { merge: true });
+
+    try {
+      localStorage.setItem(`cached_user_profile_${auth.currentUser.uid}`, JSON.stringify({
+        role: updatedData.role,
+        branch: updatedData.branch,
+        mssv: updatedData.mssv,
+        name: updatedData.name,
+      }));
+    } catch {}
 
     setCurrentUser((prev) => {
       if (!prev) return null;

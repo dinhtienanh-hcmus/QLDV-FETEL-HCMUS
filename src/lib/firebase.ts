@@ -7,3 +7,15 @@ export const firebaseConfig = firebaseConfigData;
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+export function isQuotaExceededError(err: any): boolean {
+  if (!err) return false;
+  const code = String(err?.code || '').toLowerCase();
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    code.includes('resource-exhausted') ||
+    msg.includes('quota limit exceeded') ||
+    msg.includes('quota exceeded')
+  );
+}
+

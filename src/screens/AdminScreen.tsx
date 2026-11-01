@@ -1,13 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, where } from 'firebase/firestore';
-import { db, firebaseConfig } from '../lib/firebase';
+import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, where, writeBatch } from 'firebase/firestore';
+import { db, firebaseConfig, isQuotaExceededError } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink, QrCode } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink, QrCode, Sparkles } from 'lucide-react';
 import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
 import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY } from '../utils/termUtils';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import preloaded25DtvDkd from '../data/students25DTV_DKD.json';
+
+const VIETNAMESE_REPAIR_MAP: Record<string, string> = {
+  'Ph?m': 'Phạm', 'Nguy?n': 'Nguyễn', 'B?o': 'Bảo', 'H?i': 'Hải', 'Ðang': 'Đăng', 'Qu?c': 'Quốc',
+  'Hu?nh': 'Huỳnh', 'Ng?c': 'Ngọc', 'Phu?c': 'Phước', 'T?n': 'Tấn', 'Tu?n': 'Tuấn', 'Th?nh': 'Thịnh',
+  'Ð?c': 'Đức', 'Vi?n': 'Viễn', 'M? Ái': 'Mỹ Ái', 'Nh?t': 'Nhật', 'H?ng': 'Hùng', 'Cu?ng': 'Cường',
+  'Luu': 'Lưu', 'C?m': 'Cẩm', 'Ðào': 'Đào', 'Huong': 'Hương', 'Ki?t': 'Kiệt', 'Vi?t': 'Việt',
+  'Tâm': 'Tâm', 'Ð?': 'Đỗ', 'Thành': 'Thành', 'Ð?t': 'Đạt', 'Ðông': 'Đông', 'M?c': 'Mạc',
+  'H?u': 'Hữu', 'M?nh': 'Mạnh', 'Võ': 'Võ', 'Vuong': 'Vương', 'M? M?': 'Mỹ Mỹ', 'K? Nam': 'Kỳ Nam',
+  'Qu?nh': 'Quỳnh', 'Vũ': 'Vũ', 'Nhân': 'Nhân', 'Ti?n': 'Tiến', 'Tri?t': 'Triết', 'Dương': 'Dương',
+  'Ðình': 'Đình', 'T?t': 'Tất', 'Ðoàn': 'Đoàn', 'Kh?i': 'Khải', 'Trường': 'Trường', 'Truong': 'Trương',
+  'Tru?ng': 'Trường', 'Th?': 'Thị', 'Lu?t': 'Luật', 'Nghia': 'Nghĩa', 'Th?ng': 'Thắng', 'Ðang Khoa': 'Đăng Khoa',
+  'Tr?n': 'Trần', 'H?': 'Hồ', 'V?': 'Vũ', 'M?': 'Mỹ', 'Kh?nh': 'Khánh', 'Cát': 'Cát', 'Nhu': 'Như'
+};
+
+function repairVietnameseName(raw: string): string {
+  if (!raw) return '';
+  let res = raw.trim();
+  for (const [k, v] of Object.entries(VIETNAMESE_REPAIR_MAP)) {
+    res = res.split(k).join(v);
+  }
+  return res.replace(/Ð/g, 'Đ').trim();
+}
 
 interface Organizer {
   mssv: string;
@@ -46,6 +69,7 @@ interface Activity {
 export default function AdminScreen() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
   const { currentUser } = useAuth();
   
   const [name, setName] = useState('');
@@ -83,7 +107,7 @@ export default function AdminScreen() {
 
   const isUserInMyBranch = (u: any) => {
     if (isAdmin) {
-      return u.role === 'chidoan' || u.role === 'admin';
+      return true;
     }
     if (isBranch) {
       const myBranch = (currentUser?.branch || '').trim().toLowerCase();
@@ -168,6 +192,14 @@ export default function AdminScreen() {
   });
 
   useEffect(() => {
+    try {
+      const cachedUsers = localStorage.getItem('cached_admin_users');
+      if (cachedUsers) setUsersList(JSON.parse(cachedUsers));
+      const cachedActs = localStorage.getItem('cached_admin_activities');
+      if (cachedActs) setActivities(JSON.parse(cachedActs));
+      const cachedBranches = localStorage.getItem('cached_admin_branches');
+      if (cachedBranches) setBranches(JSON.parse(cachedBranches));
+    } catch {}
     fetchActivities();
     fetchUsers();
     fetchBchTerms();
@@ -387,9 +419,16 @@ export default function AdminScreen() {
         
         updatedList.sort((a, b) => a.name.localeCompare(b.name));
         setBranches(updatedList);
+        try {
+          localStorage.setItem('cached_admin_branches', JSON.stringify(updatedList));
+        } catch {}
       }
     } catch (err) {
-      console.error('Lỗi tải Chi đoàn:', err);
+      if (isQuotaExceededError(err)) {
+        setQuotaExceeded(true);
+      } else {
+        console.error('Lỗi tải Chi đoàn:', err);
+      }
     }
   };
 
@@ -665,8 +704,26 @@ export default function AdminScreen() {
       });
 
       setUsersList(cleanedUsers);
+      setQuotaExceeded(false);
+      try {
+        localStorage.setItem('cached_admin_users', JSON.stringify(cleanedUsers));
+      } catch {}
+
+      // Sync lightweight BCH summary doc so HomeScreen only needs 1 document read
+      try {
+        const bchOnly = cleanedUsers.filter(
+          (u: any) => (u.committeeRole && String(u.committeeRole).trim() !== '') || (u.branchRole && String(u.branchRole).trim() !== '')
+        );
+        if (bchOnly.length > 0) {
+          setDoc(doc(db, 'system', 'bch_cache'), { members: bchOnly, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+        }
+      } catch {}
     } catch (e) {
-      console.error(e);
+      if (isQuotaExceededError(e)) {
+        setQuotaExceeded(true);
+      } else {
+        console.warn("Error fetching users:", e);
+      }
     } finally {
       setLoadingUsers(false);
     }
@@ -736,8 +793,16 @@ export default function AdminScreen() {
       });
       
       setActivities(filteredActs);
+      setQuotaExceeded(false);
+      try {
+        localStorage.setItem('cached_admin_activities', JSON.stringify(filteredActs));
+      } catch {}
     } catch (err) {
-      console.error(err);
+      if (isQuotaExceededError(err)) {
+        setQuotaExceeded(true);
+      } else {
+        console.error(err);
+      }
     } finally {
       setLoading(false);
     }
@@ -1143,16 +1208,99 @@ export default function AdminScreen() {
     document.body.removeChild(link);
   };
 
+  const handleImportPreloaded25DTV_DKD = async () => {
+    if (!isAdmin && !isBranch) return;
+    if (!window.confirm("Bạn có muốn nạp dữ liệu 114 sinh viên lớp 25DTV_DKD vào hệ thống để các bạn đăng nhập lần đầu và tự động liên kết tài khoản?")) {
+      return;
+    }
+
+    setCreatingAccount(true);
+    try {
+      const existingUserByKey = new Map<string, string>();
+      usersList.forEach((u: any) => {
+        const mKey = String(u.mssv || '').trim().toLowerCase();
+        const uKey = String(u.username || '').trim().toLowerCase();
+        if (mKey && !u.id.startsWith('profile_')) existingUserByKey.set(mKey, u.id);
+        if (uKey && !u.id.startsWith('profile_')) existingUserByKey.set(uKey, u.id);
+      });
+
+      let batch = writeBatch(db);
+      let batchCount = 0;
+      let totalMerged = 0;
+      let totalCreated = 0;
+
+      for (const item of preloaded25DtvDkd) {
+        const mssvStr = String(item.mssv).trim();
+        if (!mssvStr) continue;
+        const lowerKey = mssvStr.toLowerCase();
+        const studentName = repairVietnameseName(item.name);
+        const branchStr = item.branch || '25DTV_DKD';
+
+        const activeId = existingUserByKey.get(lowerKey);
+        if (activeId) {
+          batch.set(doc(db, 'users', activeId), {
+            name: studentName,
+            mssv: mssvStr,
+            branch: branchStr,
+            updatedAt: Date.now()
+          }, { merge: true });
+          totalMerged++;
+        } else {
+          const docRef = doc(db, 'users', `profile_${lowerKey}`);
+          batch.set(docRef, {
+            username: mssvStr,
+            mssv: mssvStr,
+            email: `${mssvStr}@student.hcmus.edu.vn`,
+            name: studentName,
+            role: 'doanvien',
+            branch: branchStr,
+            createdAt: Date.now()
+          }, { merge: true });
+          totalCreated++;
+        }
+
+        batchCount++;
+        if (batchCount >= 40) {
+          await batch.commit();
+          batch = writeBatch(db);
+          batchCount = 0;
+        }
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+
+      alert(`Đã nạp thành công 114 sinh viên lớp 25DTV_DKD!\n- Tạo mới hồ sơ chờ liên kết: ${totalCreated}\n- Đồng bộ với tài khoản đã kích hoạt: ${totalMerged}`);
+      fetchUsers();
+    } catch (err: any) {
+      if (isQuotaExceededError(err)) {
+        alert("Cơ sở dữ liệu tạm thời chạm giới hạn đọc/ghi miễn phí trong ngày (Quota exceeded). Vui lòng thử lại vào ngày tiếp theo hoặc nâng cấp gói Firestore.");
+      } else {
+        console.error('Lỗi nạp danh sách 25DTV_DKD:', err);
+        alert('Lỗi nạp danh sách: ' + (err?.message || 'Có lỗi xảy ra'));
+      }
+    } finally {
+      setCreatingAccount(false);
+    }
+  };
+
   const handleBulkImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || (!isAdmin && !isBranch)) return;
     
     setCreatingAccount(true);
     Papa.parse(file, {
-      header: true,
+      header: false,
       skipEmptyLines: true,
       complete: async function(results) {
-        const rows = results.data as any[];
+        const rawRows = results.data as string[][];
+        if (!rawRows || rawRows.length === 0) {
+          setCreatingAccount(false);
+          alert("File CSV không có dữ liệu!");
+          return;
+        }
+
         let count = 0;
         
         try {
@@ -1164,62 +1312,110 @@ export default function AdminScreen() {
            }
            const secondaryAuth = getAuth(secondaryApp);
 
-           for (const row of rows) {
-              // Normalize keys to find matchings safely (handles BOM, spaces, casing)
-              const cleanRow = {};
-              Object.keys(row).forEach(k => {
-                const cleanKey = k.replace(/^\uFEFF/, '').trim().toLowerCase();
-                cleanRow[cleanKey] = row[k];
-              });
+           // Build in-memory lookup map from usersList to avoid N+1 Firestore reads per CSV row
+           const existingUserByKey = new Map<string, string>();
+           usersList.forEach((u: any) => {
+             const mKey = String(u.mssv || '').trim().toLowerCase();
+             const uKey = String(u.username || '').trim().toLowerCase();
+             if (mKey && !u.id.startsWith('profile_')) existingUserByKey.set(mKey, u.id);
+             if (uKey && !u.id.startsWith('profile_')) existingUserByKey.set(uKey, u.id);
+           });
 
-              const getVal = (keywords) => {
-                const foundKey = Object.keys(cleanRow).find(k => 
-                  keywords.some(kw => k.includes(kw))
-                );
-                return foundKey ? cleanRow[foundKey]?.toString().trim() : '';
-              };
+           // Determine whether row 0 is header or data
+           const firstRowCells = (rawRows[0] || []).map(c => String(c || '').trim().toLowerCase());
+           const firstRowText = firstRowCells.join(' ');
+           const hasHeader = firstRowText.includes('mssv') || firstRowText.includes('mã') || firstRowText.includes('họ tên') || firstRowText.includes('tên');
 
-              let usernameStr = getVal(['mssv', 'tên đăng nhập', 'ten dang nhap', 'username']);
-              if (!usernameStr) continue;
+           let mssvColIdx = -1;
+           let nameColIdx = -1;
+           let hoLotColIdx = -1;
+           let tenColIdx = -1;
+           let branchColIdx = -1;
+           let roleColIdx = -1;
 
-              const newNameStr = getVal(['họ tên', 'ho ten', 'họ và tên', 'ho va ten', 'name']) || 'No Name';
-              const newRoleStr = isAdmin ? (getVal(['vai trò', 'vai tro', 'role']) || 'doanvien') : 'doanvien';
-              const newBranchStr = isAdmin ? (getVal(['lớp', 'lop', 'đơn vị', 'don vi', 'branch']) || '') : (currentUser?.branch || '');
+           if (hasHeader) {
+             firstRowCells.forEach((cell, idx) => {
+               if (cell.includes('mssv') || cell.includes('mã sv') || cell.includes('mã số') || cell.includes('username')) {
+                 if (mssvColIdx === -1) mssvColIdx = idx;
+               } else if (cell.includes('họ lót') || cell.includes('họ đệm')) {
+                 hoLotColIdx = idx;
+               } else if (cell === 'tên' || cell === 'ten') {
+                 tenColIdx = idx;
+               } else if (cell.includes('họ tên') || cell.includes('họ và tên') || cell.includes('name')) {
+                 if (nameColIdx === -1) nameColIdx = idx;
+               } else if (cell.includes('lớp') || cell.includes('chi đoàn') || cell.includes('branch')) {
+                 if (branchColIdx === -1) branchColIdx = idx;
+               } else if (cell.includes('vai trò') || cell.includes('role')) {
+                 if (roleColIdx === -1) roleColIdx = idx;
+               }
+             });
+           } else {
+             // Auto-detect columns from first row data: find which column contains student numbers (e.g. 25207002)
+             firstRowCells.forEach((cell, idx) => {
+               const cleanDigits = cell.replace(/\D/g, '');
+               if (cleanDigits.length >= 7 && cleanDigits.length <= 10) {
+                 if (mssvColIdx === -1) mssvColIdx = idx;
+               }
+             });
+
+             if (mssvColIdx === -1) {
+               // Default standard: STT (col 0), MSSV (col 1), Họ tên (col 2), Lớp (col 3)
+               mssvColIdx = 1;
+               nameColIdx = 2;
+               branchColIdx = 3;
+             } else {
+               if (mssvColIdx === 1) {
+                 nameColIdx = 2;
+                 branchColIdx = 3;
+               } else if (mssvColIdx === 0) {
+                 nameColIdx = 1;
+                 branchColIdx = 2;
+               }
+             }
+           }
+
+           const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+           let batch = writeBatch(db);
+           let batchCount = 0;
+
+           for (const row of dataRows) {
+              if (!row || row.length === 0) continue;
+              const rawMssv = mssvColIdx >= 0 && row[mssvColIdx] ? String(row[mssvColIdx]).trim() : '';
+              const usernameStr = rawMssv.replace(/[\r\n\t]/g, '');
+              if (!usernameStr || usernameStr.length < 3) continue;
+
+              let fullName = '';
+              if (hoLotColIdx >= 0 && tenColIdx >= 0 && row[hoLotColIdx] && row[tenColIdx]) {
+                fullName = `${row[hoLotColIdx]} ${row[tenColIdx]}`.trim();
+              } else if (nameColIdx >= 0 && row[nameColIdx]) {
+                fullName = String(row[nameColIdx]).trim();
+              }
+
+              const newNameStr = repairVietnameseName(fullName) || 'Đoàn viên';
+              const rawRole = roleColIdx >= 0 && row[roleColIdx] ? String(row[roleColIdx]).toLowerCase().trim() : 'doanvien';
+              const newRoleStr = (rawRole.includes('chi đoàn') || rawRole.includes('chidoan')) ? 'chidoan' : 'doanvien';
+
+              let newBranchStr = branchColIdx >= 0 && row[branchColIdx] ? String(row[branchColIdx]).trim() : '';
+              if (!newBranchStr) {
+                newBranchStr = isAdmin ? (selectedBranchFilter || newBranch.trim() || '25DTV_DKD') : (currentUser?.branch || '');
+              }
 
               if (newRoleStr === 'doanvien') {
-                let targetDocId = 'profile_' + usernameStr.toLowerCase();
-                let existingUserFound = false;
+                const lowerKey = usernameStr.toLowerCase();
+                const matchedActiveId = existingUserByKey.get(lowerKey);
 
-                // Check if user already exists with mssv field (active user with google login etc.)
-                const qMssv = query(collection(db, 'users'), where('mssv', '==', usernameStr));
-                const qSnap = await getDocs(qMssv);
-                if (!qSnap.empty) {
-                  targetDocId = qSnap.docs[0].id;
-                  existingUserFound = true;
-                } else {
-                  // Fallback: check by username field
-                  const qUname = query(collection(db, 'users'), where('username', '==', usernameStr));
-                  const qSnap2 = await getDocs(qUname);
-                  if (!qSnap2.empty) {
-                    targetDocId = qSnap2.docs[0].id;
-                    existingUserFound = true;
-                  }
-                }
-
-                if (existingUserFound) {
-                  // Update/Merge the existing active user's data
-                  await updateDoc(doc(db, 'users', targetDocId), {
+                if (matchedActiveId) {
+                  const docRef = doc(db, 'users', matchedActiveId);
+                  batch.set(docRef, {
                     name: newNameStr,
+                    mssv: usernameStr,
                     branch: newBranchStr,
                     updatedAt: Date.now()
-                  });
-                  if (targetDocId !== 'profile_' + usernameStr.toLowerCase()) {
-                    deleteDoc(doc(db, 'users', 'profile_' + usernameStr.toLowerCase())).catch(() => {});
-                  }
+                  }, { merge: true });
                 } else {
-                  // Update or create the profile placeholder
+                  const targetDocId = 'profile_' + lowerKey;
                   const docRef = doc(db, 'users', targetDocId);
-                  await setDoc(docRef, {
+                  batch.set(docRef, {
                     username: usernameStr,
                     mssv: usernameStr,
                     email: usernameStr + '@student.hcmus.edu.vn',
@@ -1230,6 +1426,12 @@ export default function AdminScreen() {
                   }, { merge: true });
                 }
                 count++;
+                batchCount++;
+                if (batchCount >= 40) {
+                  await batch.commit();
+                  batch = writeBatch(db);
+                  batchCount = 0;
+                }
              } else if (isAdmin && newRoleStr === 'chidoan') {
                const rawU = usernameStr.toLowerCase();
                const uname = rawU.endsWith('.fetel') ? rawU : `${rawU}.fetel`;
@@ -1247,16 +1449,25 @@ export default function AdminScreen() {
                  });
                  count++;
                } catch (err) {
-                 console.error("Lỗi tạo chi đoàn:", uname, err);
+                 console.warn("Lỗi tạo chi đoàn:", uname, err);
                }
              }
            }
+
+           if (batchCount > 0) {
+             await batch.commit();
+           }
+
            await signOut(secondaryAuth);
-           alert(`Đã cập nhật/import thành công ${count} hồ sơ đoàn viên!`);
+           alert(`Đã cập nhật/import thành công ${count} hồ sơ đoàn viên vào hệ thống!`);
            fetchUsers();
-        } catch (err) {
-            console.error(err);
-            alert("Lỗi import: " + (err?.message || "Vui lòng kiểm tra định dạng file."));
+        } catch (err: any) {
+            if (isQuotaExceededError(err)) {
+              alert("Cơ sở dữ liệu tạm thời chạm giới hạn lượt đọc/ghi miễn phí trong ngày (Quota exceeded). Vui lòng thử lại vào ngày tiếp theo hoặc nâng cấp gói Firestore.");
+            } else {
+              console.warn(err);
+              alert("Lỗi import: " + (err?.message || "Vui lòng kiểm tra định dạng file."));
+            }
          } finally {
            setCreatingAccount(false);
            if (e.target) e.target.value = '';
@@ -1441,6 +1652,16 @@ export default function AdminScreen() {
       </div>
 
       <div className="flex-1 p-4 space-y-4 overflow-y-auto pb-10">
+        {quotaExceeded && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-amber-900 shadow-xs">
+            <div className="text-xs sm:text-sm font-extrabold flex items-center gap-1.5 text-amber-800">
+              <span>⏳</span> Dữ liệu trên máy chủ KHÔNG bị mất — Hạn mức đọc của Google sẽ reset lúc 14:00 chiều nay (giờ Việt Nam)
+            </div>
+            <p className="text-[11px] sm:text-xs text-amber-800/90 mt-1.5 leading-relaxed">
+              Toàn bộ dữ liệu Đoàn viên (bao gồm lớp 25ICD bạn vừa import), Chi đoàn, Ban Chấp hành và Hoạt động <strong>vẫn còn nguyên vẹn 100% trên Firestore</strong>. Sở dĩ bạn không còn thấy thông báo lỗi đỏ là do ứng dụng đã chặn popup báo lỗi để tránh làm văng trang, nhưng hạn mức đọc miễn phí hằng ngày của Google Firebase được tính theo <strong>00:00 giờ Thái Bình Dương (Pacific Time)</strong> — tức là <strong>14:00 chiều theo giờ Việt Nam</strong> mới được đặt lại (reset). Ngay sau 14:00 chiều nay (hoặc ngay khi nâng cấp gói dữ liệu), toàn bộ danh sách sẽ tự động hiển thị trở lại bình thường!
+            </p>
+          </div>
+        )}
         
         {isBranch && (
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl shadow-sm border border-blue-200">
@@ -2174,7 +2395,7 @@ export default function AdminScreen() {
                   </h3>
                   <p className="text-xs text-slate-500 mb-3">Tải mẫu CSV và sử dụng đúng định dạng để cập nhật danh sách thông tin đoàn viên lớp của bạn vào hệ thống.</p>
                   
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                      <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1 cursor-pointer">
                        <FileSpreadsheet size={14} className="mr-1.5" /> Tải mẫu CSV
                      </button>
@@ -2183,6 +2404,18 @@ export default function AdminScreen() {
                        <input type="file" accept=".csv" className="hidden" onChange={handleBulkImport} disabled={creatingAccount} />
                      </label>
                   </div>
+                  {isAdmin && (
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={handleImportPreloaded25DTV_DKD}
+                        disabled={creatingAccount}
+                        className="w-full text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-2 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                      >
+                        <Sparkles size={14} className="text-indigo-600" /> Nạp ngay 114 sinh viên lớp 25DTV_DKD (Dữ liệu đính kèm)
+                      </button>
+                    </div>
+                  )}
                   {creatingAccount && <div className="text-xs text-center mt-2 text-blue-600 font-medium">Đang tiến hành cập nhật/import dữ liệu đoàn viên, xin vui lòng đợi...</div>}
                 </div>
               </>

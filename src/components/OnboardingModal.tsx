@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { CreditCard, CheckCircle2, AlertCircle, Search, RefreshCw, User, Users } from 'lucide-react';
 import { collection, query, where, getDocs, doc, getDoc, deleteDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, isQuotaExceededError } from '../lib/firebase';
 
 interface FoundProfile {
   name: string;
@@ -26,6 +26,7 @@ export default function OnboardingModal() {
     currentUser.role === 'admin' || 
     currentUser.role === 'chidoan' || 
     userEmail === 'dkdtvt.hcmus@gmail.com' || 
+    userEmail === 'dinhtienanh.hcmus@gmail.com' ||
     userEmail.endsWith('@chidoan.fetel') ||
     userEmail.includes('chidoan') ||
     userEmail.includes('admin') ||
@@ -38,7 +39,8 @@ export default function OnboardingModal() {
 
   const handleSearchProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const searchMssv = mssv.trim().toLowerCase();
+    const rawMssv = mssv.trim();
+    const searchMssv = rawMssv.toLowerCase();
     if (!searchMssv) {
       return setError('Vui lòng nhập Mã số sinh viên (MSSV)');
     }
@@ -57,41 +59,50 @@ export default function OnboardingModal() {
         setFoundProfile({
           name: d.name || 'Không rõ họ tên',
           branch: d.branch || 'Chưa phân chi đoàn',
-          mssv: d.mssv || mssv.trim()
+          mssv: d.mssv || rawMssv
         });
         return;
       }
 
-      // 2. Query users collection where mssv field matches
-      const q = query(collection(db, 'users'), where('mssv', '==', mssv.trim()));
-      const querySnap = await getDocs(q);
-      if (!querySnap.empty) {
-        const d = querySnap.docs[0].data();
-        setFoundProfile({
-          name: d.name || 'Không rõ họ tên',
-          branch: d.branch || 'Chưa phân chi đoàn',
-          mssv: d.mssv || mssv.trim()
-        });
-        return;
-      }
+      // 2. Query users collection where mssv field matches (exact or uppercase)
+      const candidates = Array.from(new Set([rawMssv, rawMssv.toUpperCase(), searchMssv]))
+        .filter(s => typeof s === 'string' && s.trim().length > 0);
 
-      // 3. Query users collection where username matches
-      const q2 = query(collection(db, 'users'), where('username', '==', mssv.trim()));
-      const querySnap2 = await getDocs(q2);
-      if (!querySnap2.empty) {
-        const d = querySnap2.docs[0].data();
-        setFoundProfile({
-          name: d.name || 'Không rõ họ tên',
-          branch: d.branch || 'Chưa phân chi đoàn',
-          mssv: d.mssv || mssv.trim()
-        });
-        return;
+      if (candidates.length > 0) {
+        const q = query(collection(db, 'users'), where('mssv', 'in', candidates));
+        const querySnap = await getDocs(q);
+        if (!querySnap.empty) {
+          const d = querySnap.docs[0].data();
+          setFoundProfile({
+            name: d.name || 'Không rõ họ tên',
+            branch: d.branch || 'Chưa phân chi đoàn',
+            mssv: d.mssv || rawMssv
+          });
+          return;
+        }
+
+        // 3. Query users collection where username matches
+        const q2 = query(collection(db, 'users'), where('username', 'in', candidates));
+        const querySnap2 = await getDocs(q2);
+        if (!querySnap2.empty) {
+          const d = querySnap2.docs[0].data();
+          setFoundProfile({
+            name: d.name || 'Không rõ họ tên',
+            branch: d.branch || 'Chưa phân chi đoàn',
+            mssv: d.mssv || rawMssv
+          });
+          return;
+        }
       }
 
       setError('Không tìm thấy MSSV này trong danh sách đã được import. Vui lòng kiểm tra lại hoặc liên hệ Chi đoàn / Đoàn khoa để được hỗ trợ.');
     } catch (err: any) {
-      console.error('Error finding profile:', err);
-      setError('Đã xảy ra lỗi khi tìm kiếm thông tin. Vui lòng thử lại.');
+      if (isQuotaExceededError(err)) {
+        setError('Hệ thống cơ sở dữ liệu đã đạt giới hạn lượt đọc miễn phí trong ngày (Quota exceeded). Hạn mức sẽ tự động làm mới vào ngày tiếp theo.');
+      } else {
+        console.warn('Error finding profile:', err);
+        setError('Đã xảy ra lỗi khi tìm kiếm thông tin. Vui lòng thử lại.');
+      }
     } finally {
       setSearching(false);
     }

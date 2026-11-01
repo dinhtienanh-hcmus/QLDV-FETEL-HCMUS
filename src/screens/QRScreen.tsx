@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { collection, query, getDocs, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, isQuotaExceededError } from '../lib/firebase';
 import { Html5Qrcode } from 'html5-qrcode';
 import { formatDateToDDMMYYYY } from '../utils/termUtils';
 
@@ -76,6 +76,10 @@ export default function QRScreen() {
 
   useEffect(() => {
     if (!currentUser?.uid) return;
+    try {
+      const cached = localStorage.getItem(`cached_user_acts_${currentUser.uid}`);
+      if (cached) setUserActivities(JSON.parse(cached));
+    } catch {}
     fetchUserActivities();
   }, [currentUser?.uid]);
 
@@ -111,7 +115,9 @@ export default function QRScreen() {
             }
           }
         } catch (e) {
-          console.error("Error fetching individual registration:", actDoc.id, e);
+          if (!isQuotaExceededError(e)) {
+            console.warn("Error fetching individual registration:", actDoc.id, e);
+          }
         }
         return null;
       });
@@ -119,8 +125,13 @@ export default function QRScreen() {
       const results = await Promise.all(promises);
       const acts = results.filter((r): r is UserActivity => r !== null);
       setUserActivities(acts);
+      try {
+        localStorage.setItem(`cached_user_acts_${currentUser.uid}`, JSON.stringify(acts));
+      } catch {}
     } catch (err) {
-      console.error("Error fetching user activities:", err);
+      if (!isQuotaExceededError(err)) {
+        console.warn("Error fetching user activities:", err);
+      }
     }
   };
 
