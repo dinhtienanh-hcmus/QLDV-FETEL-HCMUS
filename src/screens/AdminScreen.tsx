@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, writeBatch } from 'firebase/firestore';
 import { db, firebaseConfig, isQuotaExceededError } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, ExternalLink, QrCode, CheckCircle2 } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, ExternalLink, QrCode, CheckCircle2, Clock } from 'lucide-react';
 import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
@@ -695,6 +695,29 @@ export default function AdminScreen() {
         let cPeriod = usr.committeePeriod;
         let bTerm = usr.branchTerm;
 
+        let uName = (usr.name || '').trim();
+        let uMssv = (usr.mssv || '').trim();
+        let uUsername = (usr.username || '').trim();
+        let uEmail = (usr.email || '').trim();
+
+        // 1. Tự động chuẩn hóa nếu Họ tên và MSSV bị lưu ngược (Tên toàn số, MSSV có chữ cái)
+        const nameIsNumeric = /^\d{6,10}$/.test(uName);
+        const mssvHasText = !/^\d{6,10}$/.test(uMssv) && uMssv.length > 0;
+        if (nameIsNumeric && mssvHasText) {
+          const actualName = uMssv;
+          const actualMssv = uName;
+          uName = actualName;
+          uMssv = actualMssv;
+          uUsername = actualMssv;
+          modified = true;
+        }
+
+        // 2. Xóa bỏ email sinh viên ảo (@student.hcmus.edu.vn)
+        if (uEmail.toLowerCase().includes('@student.hcmus.edu.vn')) {
+          uEmail = '';
+          modified = true;
+        }
+
         if (cTerm && isTermExpired(cTerm)) {
           cTerm = null;
           modified = true;
@@ -709,15 +732,24 @@ export default function AdminScreen() {
         }
 
         if (modified && isAdmin) {
-          updateDoc(doc(db, 'users', usr.id), {
+          const updatePayload: Record<string, any> = {
+            name: uName,
+            mssv: uMssv,
+            username: uUsername,
+            email: uEmail,
             committeeTerm: cTerm,
             committeePeriod: cPeriod,
             branchTerm: bTerm
-          }).catch(console.error);
+          };
+          updateDoc(doc(db, 'users', usr.id), updatePayload).catch(console.error);
         }
 
         return {
           ...usr,
+          name: uName,
+          mssv: uMssv,
+          username: uUsername,
+          email: uEmail,
           committeeTerm: cTerm,
           committeePeriod: cPeriod,
           branchTerm: bTerm
@@ -1082,10 +1114,11 @@ export default function AdminScreen() {
         await setDoc(docRef, {
           username: cleanUname,
           mssv: cleanUname,
-          email: `${cleanUname}@student.hcmus.edu.vn`,
+          email: '',
           name: newName.trim(),
           role: 'doanvien',
           branch: activeBranch,
+          isMerged: false,
           createdAt: Date.now()
         }, { merge: true });
         alert(`Đã tạo hồ sơ Đoàn viên cho ${newName} (${cleanUname}).\nĐoàn viên sẽ tự đăng nhập bằng Google!`);
@@ -1400,10 +1433,11 @@ export default function AdminScreen() {
             batch.set(docRef, {
               username: record.mssv,
               mssv: record.mssv,
-              email: `${record.mssv}@student.hcmus.edu.vn`,
+              email: '',
               name: record.name,
               role: 'doanvien',
               branch: record.branch,
+              isMerged: false,
               createdAt: Date.now()
             }, { merge: true });
           }
@@ -1442,11 +1476,12 @@ export default function AdminScreen() {
 
   const handleEditUser = (u: any) => {
     setEditingUserInfo(u);
+    const cleanEmail = (u.email || '').includes('@student.hcmus.edu.vn') ? '' : (u.email || '');
     setUserEditForm({
       name: u.name || '',
       mssv: u.mssv || u.username || '',
       branch: u.branch || currentUser?.branch || '',
-      email: u.email || '',
+      email: cleanEmail,
       username: u.username || u.mssv || '',
       role: u.role || 'doanvien'
     });
@@ -2415,31 +2450,56 @@ export default function AdminScreen() {
                         (u.branch || '').toLowerCase().includes(q)
                       );
                     })
-                    .map((u: any) => (
-                      <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100/80 transition-all">
-                         <div>
-                            <div className="text-xs font-bold text-slate-800">{u.name || 'Chưa cập nhật tên'} <span className="opacity-70 font-normal">({u.username || u.email || u.id})</span></div>
-                            <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
-                               <span className="font-semibold text-blue-700">{u.role === 'admin' ? 'QTV Khoa' : u.role === 'chidoan' ? 'BCH Chi đoàn' : 'Đoàn viên'}</span>
-                               <span>•</span>
-                               <span className="bg-slate-200/70 text-slate-700 px-1.5 py-0.5 rounded font-medium">{u.branch || 'Chưa phân lớp'}</span>
-                               {u.committeeRole && (
-                                 <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[9px]">{u.committeeRole}</span>
-                               )}
-                               {u.mssv && (
-                                 <>
-                                   <span>•</span>
-                                   <span>MSSV: {u.mssv}</span>
-                                 </>
-                               )}
-                               {u.email && (
-                                 <>
-                                   <span>•</span>
-                                   <span className="truncate max-w-[180px]">{u.email}</span>
-                                 </>
-                               )}
-                            </div>
-                         </div>
+                    .map((u: any) => {
+                      const isStudent = u.role === 'doanvien' || !u.role;
+                      const isPlaceholder = u.id.startsWith('profile_');
+                      const hasRealGoogleEmail = Boolean(u.email && !u.email.includes('@student.hcmus.edu.vn') && u.email.includes('@'));
+                      const isMerged = !isPlaceholder && (u.isMerged === true || hasRealGoogleEmail);
+
+                      return (
+                        <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100/80 transition-all">
+                           <div>
+                              <div className="text-xs font-bold text-slate-800 flex items-center gap-2 flex-wrap">
+                                 <span>{u.name || 'Chưa cập nhật tên'}</span>
+                                 {u.mssv && (
+                                   <span className="font-semibold text-slate-600 bg-slate-200/70 px-1.5 py-0.5 rounded text-[11px]">
+                                     MSSV: {u.mssv}
+                                   </span>
+                                 )}
+                              </div>
+                              <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
+                                 <span className="font-semibold text-blue-700">{u.role === 'admin' ? 'QTV Khoa' : u.role === 'chidoan' ? 'BCH Chi đoàn' : 'Đoàn viên'}</span>
+                                 <span>•</span>
+                                 <span className="bg-slate-200/70 text-slate-700 px-1.5 py-0.5 rounded font-medium">{u.branch || 'Chưa phân lớp'}</span>
+                                 {u.committeeRole && (
+                                   <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[9px]">{u.committeeRole}</span>
+                                 )}
+                                 {isStudent ? (
+                                   isMerged && hasRealGoogleEmail ? (
+                                     <>
+                                       <span>•</span>
+                                       <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-semibold px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
+                                         <CheckCircle2 size={11} className="text-emerald-600" /> Đã liên kết: {u.email}
+                                       </span>
+                                     </>
+                                   ) : (
+                                     <>
+                                       <span>•</span>
+                                       <span className="bg-amber-50 text-amber-700 border border-amber-200/80 font-medium px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
+                                         <Clock size={11} className="text-amber-600" /> Chưa liên kết Google (Chờ đăng nhập)
+                                       </span>
+                                     </>
+                                   )
+                                 ) : (
+                                   hasRealGoogleEmail && (
+                                     <>
+                                       <span>•</span>
+                                       <span className="truncate max-w-[180px] text-slate-600 font-medium">{u.email}</span>
+                                     </>
+                                   )
+                                 )}
+                              </div>
+                           </div>
                          <div className="flex items-center gap-1.5 shrink-0">
                             <button onClick={() => handleOpenBchEdit(u)} className="p-1.5 text-amber-700 bg-amber-50 hover:bg-amber-100 rounded text-[10px] font-bold flex items-center shrink-0" title="Gán/Cập nhật chức vụ BCH">
                                <Users size={12} className="mr-1" /> Gán BCH
@@ -2451,8 +2511,9 @@ export default function AdminScreen() {
                                <Trash2 size={12} className="mr-1" /> Xóa
                             </button>
                          </div>
-                      </div>
-                   ))}
+                       </div>
+                     );
+                   })}
                    {usersList.filter((u: any) => {
                       if (!isUserInMyBranch(u)) return false;
                       if (isAdmin && selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
@@ -2530,7 +2591,7 @@ export default function AdminScreen() {
                              <div className="flex items-center space-x-3">
                                 <img src={u.avatar || "/logo_doan.png"} alt="avatar" className="w-8 h-8 rounded-full border border-slate-200 object-cover" />
                                 <div>
-                                   <div className="font-bold text-slate-800">{u.name} <span className="text-[10px] font-normal text-slate-500">({u.email || u.username})</span></div>
+                                   <div className="font-bold text-slate-800">{u.name} <span className="text-[10px] font-normal text-slate-500">{u.mssv ? `(MSSV: ${u.mssv})` : (u.email ? `(${u.email})` : '')}</span></div>
                                    <div className="text-[10px] text-slate-500 mt-0.5">
                                       {u.committeeRole} • NK {u.committeeTerm || '2025-2027'}
                                    </div>
@@ -2566,7 +2627,7 @@ export default function AdminScreen() {
                        }).map((u: any) => (
                           <div key={u.id} className="flex justify-between items-center p-2 bg-slate-50 border border-slate-100 rounded-lg">
                              <div>
-                                <div className="font-bold text-slate-800 text-[11px]">{u.name} <span className="font-normal opacity-70">({u.email || u.username})</span></div>
+                                <div className="font-bold text-slate-800 text-[11px]">{u.name} <span className="font-normal opacity-70">{u.mssv ? `(MSSV: ${u.mssv})` : (u.email ? `(${u.email})` : '')}</span></div>
                                 <div className="text-[9px] text-slate-500 mt-0.5">{u.branch || 'Chưa cập nhật đơn vị'}</div>
                              </div>
                              <div className="flex items-center gap-1">

@@ -129,8 +129,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             let matchedProfile: any = null;
             let mssvFromEmail = '';
             
-            if (userEmailLower.includes('@student.hcmus.edu.vn')) {
-              mssvFromEmail = userEmailLower.split('@')[0].trim();
+            // Check if email username begins with numeric MSSV (e.g. 25207001... or similar)
+            const digitsMatch = userEmailLower.split('@')[0].match(/^\d{7,10}/);
+            if (digitsMatch) {
+              mssvFromEmail = digitsMatch[0];
             }
 
             if (mssvFromEmail) {
@@ -271,6 +273,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: isDefaultAdmin ? 'admin' : (currentUser?.role || 'doanvien'),
       branch: data.branch,
       mssv: data.mssv,
+      isMerged: true,
       createdAt: currentUser ? (currentUser as any).createdAt || Date.now() : Date.now(),
       updatedAt: Date.now(),
     };

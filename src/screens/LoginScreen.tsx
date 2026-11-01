@@ -63,8 +63,7 @@ export default function LoginScreen() {
       return `${uname}@chidoan.fetel`;
     }
     
-    // Map MSSV (toàn số)
-    return `${trimmed}@student.hcmus.edu.vn`;
+    return `${trimmed}@chidoan.fetel`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
