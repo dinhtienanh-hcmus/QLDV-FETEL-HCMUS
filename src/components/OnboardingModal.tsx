@@ -8,6 +8,7 @@ interface FoundProfile {
   name: string;
   mssv: string;
   branch: string;
+  docIdToDelete?: string;
 }
 
 export default function OnboardingModal() {
@@ -49,18 +50,26 @@ export default function OnboardingModal() {
     setError('');
     setFoundProfile(null);
 
+    const normalizeDoc = (d: any, docId: string): FoundProfile => {
+      const nameIsNum = /^\d{6,10}$/.test(String(d.name || '').trim());
+      const mssvHasText = !/^\d{6,10}$/.test(String(d.mssv || '').trim()) && String(d.mssv || '').trim().length > 0;
+      const realName = (nameIsNum && mssvHasText) ? d.mssv : (d.name || 'Không rõ họ tên');
+      const realMssv = (nameIsNum && mssvHasText) ? d.name : (d.mssv || rawMssv);
+      return {
+        name: realName,
+        branch: d.branch || 'Chưa phân chi đoàn',
+        mssv: realMssv,
+        docIdToDelete: docId
+      };
+    };
+
     try {
       // 1. Try to fetch direct document `profile_${mssv}` (format used by CSV Bulk Import)
       const docRef = doc(db, 'users', `profile_${searchMssv}`);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
-        const d = docSnap.data();
-        setFoundProfile({
-          name: d.name || 'Không rõ họ tên',
-          branch: d.branch || 'Chưa phân chi đoàn',
-          mssv: d.mssv || rawMssv
-        });
+        setFoundProfile(normalizeDoc(docSnap.data(), docSnap.id));
         return;
       }
 
@@ -72,12 +81,7 @@ export default function OnboardingModal() {
         const q = query(collection(db, 'users'), where('mssv', 'in', candidates));
         const querySnap = await getDocs(q);
         if (!querySnap.empty) {
-          const d = querySnap.docs[0].data();
-          setFoundProfile({
-            name: d.name || 'Không rõ họ tên',
-            branch: d.branch || 'Chưa phân chi đoàn',
-            mssv: d.mssv || rawMssv
-          });
+          setFoundProfile(normalizeDoc(querySnap.docs[0].data(), querySnap.docs[0].id));
           return;
         }
 
@@ -85,12 +89,15 @@ export default function OnboardingModal() {
         const q2 = query(collection(db, 'users'), where('username', 'in', candidates));
         const querySnap2 = await getDocs(q2);
         if (!querySnap2.empty) {
-          const d = querySnap2.docs[0].data();
-          setFoundProfile({
-            name: d.name || 'Không rõ họ tên',
-            branch: d.branch || 'Chưa phân chi đoàn',
-            mssv: d.mssv || rawMssv
-          });
+          setFoundProfile(normalizeDoc(querySnap2.docs[0].data(), querySnap2.docs[0].id));
+          return;
+        }
+
+        // 4. Query users collection where name matches candidates (in case name held the MSSV number)
+        const q3 = query(collection(db, 'users'), where('name', 'in', candidates));
+        const querySnap3 = await getDocs(q3);
+        if (!querySnap3.empty) {
+          setFoundProfile(normalizeDoc(querySnap3.docs[0].data(), querySnap3.docs[0].id));
           return;
         }
       }
@@ -123,6 +130,9 @@ export default function OnboardingModal() {
       try {
         const cleanMssv = foundProfile.mssv.trim().toLowerCase();
         await deleteDoc(doc(db, 'users', `profile_${cleanMssv}`));
+        if (foundProfile.docIdToDelete && foundProfile.docIdToDelete !== `profile_${cleanMssv}`) {
+          await deleteDoc(doc(db, 'users', foundProfile.docIdToDelete));
+        }
       } catch (cleanErr) {
         console.warn('Could not clean up placeholder profile:', cleanErr);
       }

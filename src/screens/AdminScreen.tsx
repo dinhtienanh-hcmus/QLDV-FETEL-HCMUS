@@ -215,7 +215,27 @@ export default function AdminScreen() {
   useEffect(() => {
     try {
       const cachedUsers = localStorage.getItem('cached_admin_users');
-      if (cachedUsers) setUsersList(JSON.parse(cachedUsers));
+      if (cachedUsers) {
+        const parsed = JSON.parse(cachedUsers);
+        const normalized = parsed.map((u: any) => {
+          const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+          const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+          if (nameIsNumeric && mssvHasText) {
+            return {
+              ...u,
+              name: u.mssv,
+              mssv: u.name,
+              username: u.name,
+              email: (u.email && u.email.includes('@student.hcmus.edu.vn')) ? '' : u.email
+            };
+          }
+          if (u.email && u.email.includes('@student.hcmus.edu.vn')) {
+            return { ...u, email: '' };
+          }
+          return u;
+        });
+        setUsersList(normalized);
+      }
       const cachedActs = localStorage.getItem('cached_admin_activities');
       if (cachedActs) setActivities(JSON.parse(cachedActs));
       const cachedBranches = localStorage.getItem('cached_admin_branches');
@@ -731,7 +751,7 @@ export default function AdminScreen() {
           modified = true;
         }
 
-        if (modified && isAdmin) {
+        if (modified && (isAdmin || isBranch)) {
           const updatePayload: Record<string, any> = {
             name: uName,
             mssv: uMssv,
@@ -741,7 +761,19 @@ export default function AdminScreen() {
             committeePeriod: cPeriod,
             branchTerm: bTerm
           };
-          updateDoc(doc(db, 'users', usr.id), updatePayload).catch(console.error);
+          if (usr.id.startsWith('profile_') && uMssv && !usr.id.toLowerCase().includes(uMssv.toLowerCase())) {
+            const cleanDocId = `profile_${uMssv.toLowerCase()}`;
+            setDoc(doc(db, 'users', cleanDocId), {
+              ...usr,
+              ...updatePayload,
+              isMerged: false,
+              updatedAt: Date.now()
+            }, { merge: true }).then(() => {
+              deleteDoc(doc(db, 'users', usr.id)).catch(() => {});
+            }).catch(console.error);
+          } else {
+            updateDoc(doc(db, 'users', usr.id), updatePayload).catch(console.error);
+          }
         }
 
         return {
@@ -1477,12 +1509,18 @@ export default function AdminScreen() {
   const handleEditUser = (u: any) => {
     setEditingUserInfo(u);
     const cleanEmail = (u.email || '').includes('@student.hcmus.edu.vn') ? '' : (u.email || '');
+    const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+    const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+    const isFlipped = nameIsNumeric && mssvHasText;
+    const realName = isFlipped ? u.mssv : (u.name || '');
+    const realMssv = isFlipped ? u.name : (u.mssv || u.username || '');
+
     setUserEditForm({
-      name: u.name || '',
-      mssv: u.mssv || u.username || '',
+      name: realName,
+      mssv: realMssv,
       branch: u.branch || currentUser?.branch || '',
       email: cleanEmail,
-      username: u.username || u.mssv || '',
+      username: realMssv,
       role: u.role || 'doanvien'
     });
   };
@@ -2442,11 +2480,16 @@ export default function AdminScreen() {
                       }
                       const q = userSearch.toLowerCase().trim();
                       if (!q) return true;
+                      const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+                      const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+                      const isFlipped = nameIsNumeric && mssvHasText;
+                      const displayName = isFlipped ? u.mssv : (u.name || '');
+                      const displayMssv = isFlipped ? u.name : (u.mssv || u.username || '');
+
                       return (
-                        (u.name || '').toLowerCase().includes(q) ||
+                        displayName.toLowerCase().includes(q) ||
+                        displayMssv.toLowerCase().includes(q) ||
                         (u.email || '').toLowerCase().includes(q) ||
-                        (u.username || '').toLowerCase().includes(q) ||
-                        (u.mssv || '').toLowerCase().includes(q) ||
                         (u.branch || '').toLowerCase().includes(q)
                       );
                     })
@@ -2456,14 +2499,21 @@ export default function AdminScreen() {
                       const hasRealGoogleEmail = Boolean(u.email && !u.email.includes('@student.hcmus.edu.vn') && u.email.includes('@'));
                       const isMerged = !isPlaceholder && (u.isMerged === true || hasRealGoogleEmail);
 
+                      // Robust check: never render numbers as name and person name as MSSV
+                      const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+                      const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+                      const isFlipped = nameIsNumeric && mssvHasText;
+                      const displayName = isFlipped ? u.mssv : (u.name || 'Chưa cập nhật tên');
+                      const displayMssv = isFlipped ? u.name : (u.mssv || u.username || '');
+
                       return (
                         <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100/80 transition-all">
                            <div>
                               <div className="text-xs font-bold text-slate-800 flex items-center gap-2 flex-wrap">
-                                 <span>{u.name || 'Chưa cập nhật tên'}</span>
-                                 {u.mssv && (
+                                 <span>{displayName}</span>
+                                 {displayMssv && (
                                    <span className="font-semibold text-slate-600 bg-slate-200/70 px-1.5 py-0.5 rounded text-[11px]">
-                                     MSSV: {u.mssv}
+                                     MSSV: {displayMssv}
                                    </span>
                                  )}
                               </div>
