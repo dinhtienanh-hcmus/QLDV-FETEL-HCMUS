@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, QrCode, BookOpen, Settings, ScanLine, User as UserIcon } from 'lucide-react';
+import { Home, BookOpen, Settings, ScanLine, User as UserIcon } from 'lucide-react';
 import HomeScreen from './screens/HomeScreen';
 import QRScreen from './screens/QRScreen';
 import HandbookScreen from './screens/HandbookScreen';

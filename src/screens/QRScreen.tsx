@@ -10,14 +10,13 @@ import {
   Sparkles, 
   ShieldCheck,
   User,
-  Mail,
   Save,
   Building,
   CreditCard,
   Edit3
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { collection, query, getDocs, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, isQuotaExceededError } from '../lib/firebase';
 import { Html5Qrcode } from 'html5-qrcode';
 import { formatDateToDDMMYYYY } from '../utils/termUtils';

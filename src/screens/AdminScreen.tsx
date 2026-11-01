@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, writeBatch } from 'firebase/firestore';
 import { db, firebaseConfig, isQuotaExceededError } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, Plus, ExternalLink, QrCode, Sparkles } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, ExternalLink, QrCode, CheckCircle2 } from 'lucide-react';
 import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
 import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY } from '../utils/termUtils';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
-import preloaded25DtvDkd from '../data/students25DTV_DKD.json';
 
 const VIETNAMESE_REPAIR_MAP: Record<string, string> = {
   'Ph?m': 'Phạm', 'Nguy?n': 'Nguyễn', 'B?o': 'Bảo', 'H?i': 'Hải', 'Ðang': 'Đăng', 'Qu?c': 'Quốc',
@@ -77,7 +76,7 @@ export default function AdminScreen() {
   const [endTimeStr, setEndTimeStr] = useState('');
   const [pointsParticipant, setPointsParticipant] = useState(2);
   const [pointsOrganizer, setPointsOrganizer] = useState(5);
-  const [drlCategory, setDrlCategory] = useState('Mục 3: Trách nhiệm tham gia các hoạt động chính trị, xã hội, văn hóa, văn nghệ, thể thao, phòng chống tội phạm, tệ nạn xã hội');
+  const drlCategory = 'Mục 3: Trách nhiệm tham gia các hoạt động chính trị, xã hội, văn hóa, văn nghệ, thể thao, phòng chống tội phạm, tệ nạn xã hội';
   const [organizerDetails, setOrganizerDetails] = useState<Organizer[]>([]);
   const [isCooperating, setIsCooperating] = useState(false);
   const [cooperatingBranches, setCooperatingBranches] = useState<string[]>([]);
@@ -190,6 +189,28 @@ export default function AdminScreen() {
     username: '',
     role: 'doanvien'
   });
+
+  interface CsvParsedRecord {
+    stt: string;
+    mssv: string;
+    name: string;
+    branch: string;
+    role: 'doanvien' | 'chidoan';
+    isExisting: boolean;
+    existingId?: string;
+  }
+
+  interface CsvPreviewState {
+    fileName: string;
+    records: CsvParsedRecord[];
+    totalNew: number;
+    totalExisting: number;
+    branchesList: string[];
+  }
+
+  const [csvPreview, setCsvPreview] = useState<CsvPreviewState | null>(null);
+  const [isImportingConfirmed, setIsImportingConfirmed] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -886,7 +907,7 @@ export default function AdminScreen() {
         updatedAt: Date.now(),
       };
       
-      const docRef = await addDoc(collection(db, 'activities'), newAct);
+      await addDoc(collection(db, 'activities'), newAct);
 
       if (isAdmin && newAct.status === 'approved') {
         await addDoc(collection(db, 'notifications'), {
@@ -985,7 +1006,7 @@ export default function AdminScreen() {
 
       
 
-  const handleReject = async (id: string, actName: string, actTarget: string) => {
+  const handleReject = async (id: string, actName: string) => {
     if (!isAdmin) return;
     if (!window.confirm(`Bạn có chắc muốn từ chối đề xuất hoạt động "${actName}"?`)) return;
     try {
@@ -1208,60 +1229,192 @@ export default function AdminScreen() {
     document.body.removeChild(link);
   };
 
-  const handleImportPreloaded25DTV_DKD = async () => {
-    if (!isAdmin && !isBranch) return;
-    if (!window.confirm("Bạn có muốn nạp dữ liệu 114 sinh viên lớp 25DTV_DKD vào hệ thống để các bạn đăng nhập lần đầu và tự động liên kết tài khoản?")) {
-      return;
-    }
+  const handleBulkImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || (!isAdmin && !isBranch)) return;
 
-    setCreatingAccount(true);
+    Papa.parse(file, {
+      header: false,
+      skipEmptyLines: true,
+      complete: function(results) {
+        const rawRows = results.data as string[][];
+        if (!rawRows || rawRows.length === 0) {
+          alert("File CSV không có dữ liệu!");
+          return;
+        }
+
+        // Build in-memory lookup map from usersList
+        const existingUserByKey = new Map<string, string>();
+        usersList.forEach((u: any) => {
+          const mKey = String(u.mssv || '').trim().toLowerCase();
+          const uKey = String(u.username || '').trim().toLowerCase();
+          if (mKey && !u.id.startsWith('profile_')) existingUserByKey.set(mKey, u.id);
+          if (uKey && !u.id.startsWith('profile_')) existingUserByKey.set(uKey, u.id);
+        });
+
+        // Determine whether row 0 is header or data
+        const firstRowCells = (rawRows[0] || []).map(c => String(c || '').trim().toLowerCase());
+        const firstRowText = firstRowCells.join(' ');
+        const hasHeader = firstRowText.includes('mssv') || firstRowText.includes('mã') || firstRowText.includes('họ tên') || firstRowText.includes('tên');
+
+        let mssvColIdx = -1;
+        let nameColIdx = -1;
+        let hoLotColIdx = -1;
+        let tenColIdx = -1;
+        let branchColIdx = -1;
+        let roleColIdx = -1;
+
+        if (hasHeader) {
+          firstRowCells.forEach((cell, idx) => {
+            if (cell.includes('mssv') || cell.includes('mã sv') || cell.includes('mã số') || cell.includes('username')) {
+              if (mssvColIdx === -1) mssvColIdx = idx;
+            } else if (cell.includes('họ lót') || cell.includes('họ đệm')) {
+              hoLotColIdx = idx;
+            } else if (cell === 'tên' || cell === 'ten') {
+              tenColIdx = idx;
+            } else if (cell.includes('họ tên') || cell.includes('họ và tên') || cell.includes('name')) {
+              if (nameColIdx === -1) nameColIdx = idx;
+            } else if (cell.includes('lớp') || cell.includes('chi đoàn') || cell.includes('branch')) {
+              if (branchColIdx === -1) branchColIdx = idx;
+            } else if (cell.includes('vai trò') || cell.includes('role')) {
+              if (roleColIdx === -1) roleColIdx = idx;
+            }
+          });
+        } else {
+          // Auto-detect columns from first row data: find which column contains student numbers (e.g. 25207002)
+          firstRowCells.forEach((cell, idx) => {
+            const cleanDigits = cell.replace(/\D/g, '');
+            if (cleanDigits.length >= 7 && cleanDigits.length <= 10) {
+              if (mssvColIdx === -1) mssvColIdx = idx;
+            }
+          });
+
+          if (mssvColIdx === -1) {
+            // Default standard: STT (col 0), MSSV (col 1), Họ tên (col 2), Lớp (col 3)
+            mssvColIdx = 1;
+            nameColIdx = 2;
+            branchColIdx = 3;
+          } else {
+            if (mssvColIdx === 1) {
+              nameColIdx = 2;
+              branchColIdx = 3;
+            } else if (mssvColIdx === 0) {
+              nameColIdx = 1;
+              branchColIdx = 2;
+            }
+          }
+        }
+
+        const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+        const parsedRecords: CsvParsedRecord[] = [];
+        const branchesSet = new Set<string>();
+        let totalNew = 0;
+        let totalExisting = 0;
+
+        for (let i = 0; i < dataRows.length; i++) {
+          const row = dataRows[i];
+          if (!row || row.length === 0) continue;
+          const rawMssv = mssvColIdx >= 0 && row[mssvColIdx] ? String(row[mssvColIdx]).trim() : '';
+          const usernameStr = rawMssv.replace(/[\r\n\t]/g, '');
+          if (!usernameStr || usernameStr.length < 3) continue;
+
+          let fullName = '';
+          if (hoLotColIdx >= 0 && tenColIdx >= 0 && row[hoLotColIdx] && row[tenColIdx]) {
+            fullName = `${row[hoLotColIdx]} ${row[tenColIdx]}`.trim();
+          } else if (nameColIdx >= 0 && row[nameColIdx]) {
+            fullName = String(row[nameColIdx]).trim();
+          }
+
+          const newNameStr = repairVietnameseName(fullName) || 'Đoàn viên';
+          const rawRole = roleColIdx >= 0 && row[roleColIdx] ? String(row[roleColIdx]).toLowerCase().trim() : 'doanvien';
+          const newRoleStr: 'doanvien' | 'chidoan' = (rawRole.includes('chi đoàn') || rawRole.includes('chidoan')) ? 'chidoan' : 'doanvien';
+
+          let newBranchStr = branchColIdx >= 0 && row[branchColIdx] ? String(row[branchColIdx]).trim() : '';
+          if (!newBranchStr) {
+            newBranchStr = isAdmin ? (selectedBranchFilter || newBranch.trim() || 'Chi đoàn') : (currentUser?.branch || 'Chi đoàn');
+          }
+
+          if (newBranchStr) branchesSet.add(newBranchStr);
+
+          const lowerKey = usernameStr.toLowerCase();
+          const matchedActiveId = existingUserByKey.get(lowerKey);
+          const isExisting = Boolean(matchedActiveId);
+          if (isExisting) {
+            totalExisting++;
+          } else {
+            totalNew++;
+          }
+
+          parsedRecords.push({
+            stt: String(parsedRecords.length + 1),
+            mssv: usernameStr,
+            name: newNameStr,
+            branch: newBranchStr,
+            role: newRoleStr,
+            isExisting,
+            existingId: matchedActiveId
+          });
+        }
+
+        if (parsedRecords.length === 0) {
+          alert("Không nhận diện được dòng dữ liệu đoàn viên hợp lệ nào trong file CSV. Vui lòng kiểm tra lại file mẫu.");
+          return;
+        }
+
+        setCsvPreview({
+          fileName: file.name,
+          records: parsedRecords,
+          totalNew,
+          totalExisting,
+          branchesList: Array.from(branchesSet)
+        });
+      }
+    });
+
+    if (e.target) e.target.value = '';
+  };
+
+  const handleConfirmBulkImport = async () => {
+    if (!csvPreview || isImportingConfirmed) return;
+    setIsImportingConfirmed(true);
+    setImportProgress({ current: 0, total: csvPreview.records.length });
+
     try {
-      const existingUserByKey = new Map<string, string>();
-      usersList.forEach((u: any) => {
-        const mKey = String(u.mssv || '').trim().toLowerCase();
-        const uKey = String(u.username || '').trim().toLowerCase();
-        if (mKey && !u.id.startsWith('profile_')) existingUserByKey.set(mKey, u.id);
-        if (uKey && !u.id.startsWith('profile_')) existingUserByKey.set(uKey, u.id);
-      });
-
       let batch = writeBatch(db);
       let batchCount = 0;
-      let totalMerged = 0;
-      let totalCreated = 0;
+      let totalProcessed = 0;
 
-      for (const item of preloaded25DtvDkd) {
-        const mssvStr = String(item.mssv).trim();
-        if (!mssvStr) continue;
-        const lowerKey = mssvStr.toLowerCase();
-        const studentName = repairVietnameseName(item.name);
-        const branchStr = item.branch || '25DTV_DKD';
-
-        const activeId = existingUserByKey.get(lowerKey);
-        if (activeId) {
-          batch.set(doc(db, 'users', activeId), {
-            name: studentName,
-            mssv: mssvStr,
-            branch: branchStr,
-            updatedAt: Date.now()
-          }, { merge: true });
-          totalMerged++;
-        } else {
-          const docRef = doc(db, 'users', `profile_${lowerKey}`);
-          batch.set(docRef, {
-            username: mssvStr,
-            mssv: mssvStr,
-            email: `${mssvStr}@student.hcmus.edu.vn`,
-            name: studentName,
-            role: 'doanvien',
-            branch: branchStr,
-            createdAt: Date.now()
-          }, { merge: true });
-          totalCreated++;
+      for (const record of csvPreview.records) {
+        if (record.role === 'doanvien') {
+          if (record.isExisting && record.existingId) {
+            const docRef = doc(db, 'users', record.existingId);
+            batch.set(docRef, {
+              name: record.name,
+              mssv: record.mssv,
+              branch: record.branch,
+              updatedAt: Date.now()
+            }, { merge: true });
+          } else {
+            const targetDocId = 'profile_' + record.mssv.toLowerCase();
+            const docRef = doc(db, 'users', targetDocId);
+            batch.set(docRef, {
+              username: record.mssv,
+              mssv: record.mssv,
+              email: `${record.mssv}@student.hcmus.edu.vn`,
+              name: record.name,
+              role: 'doanvien',
+              branch: record.branch,
+              createdAt: Date.now()
+            }, { merge: true });
+          }
         }
 
         batchCount++;
+        totalProcessed++;
+
         if (batchCount >= 40) {
           await batch.commit();
+          setImportProgress({ current: totalProcessed, total: csvPreview.records.length });
           batch = writeBatch(db);
           batchCount = 0;
         }
@@ -1271,209 +1424,20 @@ export default function AdminScreen() {
         await batch.commit();
       }
 
-      alert(`Đã nạp thành công 114 sinh viên lớp 25DTV_DKD!\n- Tạo mới hồ sơ chờ liên kết: ${totalCreated}\n- Đồng bộ với tài khoản đã kích hoạt: ${totalMerged}`);
+      alert(`Đã nạp thành công ${csvPreview.records.length} đoàn viên vào hệ thống!\n- Tạo mới hồ sơ chờ liên kết: ${csvPreview.totalNew}\n- Cập nhật tài khoản đã kích hoạt: ${csvPreview.totalExisting}`);
+      setCsvPreview(null);
       fetchUsers();
     } catch (err: any) {
       if (isQuotaExceededError(err)) {
-        alert("Cơ sở dữ liệu tạm thời chạm giới hạn đọc/ghi miễn phí trong ngày (Quota exceeded). Vui lòng thử lại vào ngày tiếp theo hoặc nâng cấp gói Firestore.");
+        alert("Cơ sở dữ liệu tạm thời chạm giới hạn lượt đọc/ghi miễn phí trong ngày (Quota exceeded). Vui lòng thử lại vào ngày tiếp theo hoặc nâng cấp gói Firestore.");
       } else {
-        console.error('Lỗi nạp danh sách 25DTV_DKD:', err);
-        alert('Lỗi nạp danh sách: ' + (err?.message || 'Có lỗi xảy ra'));
+        console.error('Lỗi khi nạp dữ liệu:', err);
+        alert('Lỗi khi nạp dữ liệu: ' + (err?.message || 'Có lỗi xảy ra'));
       }
     } finally {
-      setCreatingAccount(false);
+      setIsImportingConfirmed(false);
+      setImportProgress(null);
     }
-  };
-
-  const handleBulkImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || (!isAdmin && !isBranch)) return;
-    
-    setCreatingAccount(true);
-    Papa.parse(file, {
-      header: false,
-      skipEmptyLines: true,
-      complete: async function(results) {
-        const rawRows = results.data as string[][];
-        if (!rawRows || rawRows.length === 0) {
-          setCreatingAccount(false);
-          alert("File CSV không có dữ liệu!");
-          return;
-        }
-
-        let count = 0;
-        
-        try {
-           let secondaryApp;
-           try {
-             secondaryApp = getApp("SecondaryAppInstanceBulk");
-           } catch {
-             secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstanceBulk");
-           }
-           const secondaryAuth = getAuth(secondaryApp);
-
-           // Build in-memory lookup map from usersList to avoid N+1 Firestore reads per CSV row
-           const existingUserByKey = new Map<string, string>();
-           usersList.forEach((u: any) => {
-             const mKey = String(u.mssv || '').trim().toLowerCase();
-             const uKey = String(u.username || '').trim().toLowerCase();
-             if (mKey && !u.id.startsWith('profile_')) existingUserByKey.set(mKey, u.id);
-             if (uKey && !u.id.startsWith('profile_')) existingUserByKey.set(uKey, u.id);
-           });
-
-           // Determine whether row 0 is header or data
-           const firstRowCells = (rawRows[0] || []).map(c => String(c || '').trim().toLowerCase());
-           const firstRowText = firstRowCells.join(' ');
-           const hasHeader = firstRowText.includes('mssv') || firstRowText.includes('mã') || firstRowText.includes('họ tên') || firstRowText.includes('tên');
-
-           let mssvColIdx = -1;
-           let nameColIdx = -1;
-           let hoLotColIdx = -1;
-           let tenColIdx = -1;
-           let branchColIdx = -1;
-           let roleColIdx = -1;
-
-           if (hasHeader) {
-             firstRowCells.forEach((cell, idx) => {
-               if (cell.includes('mssv') || cell.includes('mã sv') || cell.includes('mã số') || cell.includes('username')) {
-                 if (mssvColIdx === -1) mssvColIdx = idx;
-               } else if (cell.includes('họ lót') || cell.includes('họ đệm')) {
-                 hoLotColIdx = idx;
-               } else if (cell === 'tên' || cell === 'ten') {
-                 tenColIdx = idx;
-               } else if (cell.includes('họ tên') || cell.includes('họ và tên') || cell.includes('name')) {
-                 if (nameColIdx === -1) nameColIdx = idx;
-               } else if (cell.includes('lớp') || cell.includes('chi đoàn') || cell.includes('branch')) {
-                 if (branchColIdx === -1) branchColIdx = idx;
-               } else if (cell.includes('vai trò') || cell.includes('role')) {
-                 if (roleColIdx === -1) roleColIdx = idx;
-               }
-             });
-           } else {
-             // Auto-detect columns from first row data: find which column contains student numbers (e.g. 25207002)
-             firstRowCells.forEach((cell, idx) => {
-               const cleanDigits = cell.replace(/\D/g, '');
-               if (cleanDigits.length >= 7 && cleanDigits.length <= 10) {
-                 if (mssvColIdx === -1) mssvColIdx = idx;
-               }
-             });
-
-             if (mssvColIdx === -1) {
-               // Default standard: STT (col 0), MSSV (col 1), Họ tên (col 2), Lớp (col 3)
-               mssvColIdx = 1;
-               nameColIdx = 2;
-               branchColIdx = 3;
-             } else {
-               if (mssvColIdx === 1) {
-                 nameColIdx = 2;
-                 branchColIdx = 3;
-               } else if (mssvColIdx === 0) {
-                 nameColIdx = 1;
-                 branchColIdx = 2;
-               }
-             }
-           }
-
-           const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
-           let batch = writeBatch(db);
-           let batchCount = 0;
-
-           for (const row of dataRows) {
-              if (!row || row.length === 0) continue;
-              const rawMssv = mssvColIdx >= 0 && row[mssvColIdx] ? String(row[mssvColIdx]).trim() : '';
-              const usernameStr = rawMssv.replace(/[\r\n\t]/g, '');
-              if (!usernameStr || usernameStr.length < 3) continue;
-
-              let fullName = '';
-              if (hoLotColIdx >= 0 && tenColIdx >= 0 && row[hoLotColIdx] && row[tenColIdx]) {
-                fullName = `${row[hoLotColIdx]} ${row[tenColIdx]}`.trim();
-              } else if (nameColIdx >= 0 && row[nameColIdx]) {
-                fullName = String(row[nameColIdx]).trim();
-              }
-
-              const newNameStr = repairVietnameseName(fullName) || 'Đoàn viên';
-              const rawRole = roleColIdx >= 0 && row[roleColIdx] ? String(row[roleColIdx]).toLowerCase().trim() : 'doanvien';
-              const newRoleStr = (rawRole.includes('chi đoàn') || rawRole.includes('chidoan')) ? 'chidoan' : 'doanvien';
-
-              let newBranchStr = branchColIdx >= 0 && row[branchColIdx] ? String(row[branchColIdx]).trim() : '';
-              if (!newBranchStr) {
-                newBranchStr = isAdmin ? (selectedBranchFilter || newBranch.trim() || '25DTV_DKD') : (currentUser?.branch || '');
-              }
-
-              if (newRoleStr === 'doanvien') {
-                const lowerKey = usernameStr.toLowerCase();
-                const matchedActiveId = existingUserByKey.get(lowerKey);
-
-                if (matchedActiveId) {
-                  const docRef = doc(db, 'users', matchedActiveId);
-                  batch.set(docRef, {
-                    name: newNameStr,
-                    mssv: usernameStr,
-                    branch: newBranchStr,
-                    updatedAt: Date.now()
-                  }, { merge: true });
-                } else {
-                  const targetDocId = 'profile_' + lowerKey;
-                  const docRef = doc(db, 'users', targetDocId);
-                  batch.set(docRef, {
-                    username: usernameStr,
-                    mssv: usernameStr,
-                    email: usernameStr + '@student.hcmus.edu.vn',
-                    name: newNameStr,
-                    role: 'doanvien',
-                    branch: newBranchStr,
-                    createdAt: Date.now()
-                  }, { merge: true });
-                }
-                count++;
-                batchCount++;
-                if (batchCount >= 40) {
-                  await batch.commit();
-                  batch = writeBatch(db);
-                  batchCount = 0;
-                }
-             } else if (isAdmin && newRoleStr === 'chidoan') {
-               const rawU = usernameStr.toLowerCase();
-               const uname = rawU.endsWith('.fetel') ? rawU : `${rawU}.fetel`;
-               const authEmail = `${uname}@chidoan.fetel`;
-               try {
-                 const userCred = await createUserWithEmailAndPassword(secondaryAuth, authEmail, "Abc@123");
-                 await setDoc(doc(db, 'users', userCred.user.uid), {
-                   email: '',
-                   authEmail: authEmail,
-                   username: uname,
-                   name: newNameStr,
-                   role: 'chidoan',
-                   branch: newBranchStr,
-                   createdAt: Date.now()
-                 });
-                 count++;
-               } catch (err) {
-                 console.warn("Lỗi tạo chi đoàn:", uname, err);
-               }
-             }
-           }
-
-           if (batchCount > 0) {
-             await batch.commit();
-           }
-
-           await signOut(secondaryAuth);
-           alert(`Đã cập nhật/import thành công ${count} hồ sơ đoàn viên vào hệ thống!`);
-           fetchUsers();
-        } catch (err: any) {
-            if (isQuotaExceededError(err)) {
-              alert("Cơ sở dữ liệu tạm thời chạm giới hạn lượt đọc/ghi miễn phí trong ngày (Quota exceeded). Vui lòng thử lại vào ngày tiếp theo hoặc nâng cấp gói Firestore.");
-            } else {
-              console.warn(err);
-              alert("Lỗi import: " + (err?.message || "Vui lòng kiểm tra định dạng file."));
-            }
-         } finally {
-           setCreatingAccount(false);
-           if (e.target) e.target.value = '';
-        }
-      }
-    });
   };
 
   const handleEditUser = (u: any) => {
@@ -1785,18 +1749,6 @@ export default function AdminScreen() {
                 <option value="tinhnguyen">TÌNH NGUYỆN</option>
               </select>
             </div>
-
-            {/* Temporarily hidden "Mục / Tiêu chí ĐRL" field as requested */}
-            {/*
-            <div>
-              <label className="text-[10px] font-semibold text-slate-500 uppercase ml-1 block mb-1">Mục / Tiêu chí ĐRL</label>
-              <select className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg font-medium" value={drlCategory} onChange={e => setDrlCategory(e.target.value)}>
-                <option value="Mục 1: Trách nhiệm chấp hành pháp luật và nội quy, quy chế của nhà trường">Mục 1: Trách nhiệm chấp hành pháp luật và nội quy, quy chế của nhà trường</option>
-                <option value="Mục 3: Trách nhiệm tham gia các hoạt động chính trị, xã hội, văn hóa, văn nghệ, thể thao, phòng chống tội phạm, tệ nạn xã hội">Mục 3: Trách nhiệm tham gia các hoạt động chính trị, xã hội, văn hóa, văn nghệ, thể thao, phòng chống tội phạm, tệ nạn xã hội</option>
-                <option value="Mục 4: Trách nhiệm công dân trong quan hệ cộng đồng">Mục 4: Trách nhiệm công dân trong quan hệ cộng đồng</option>
-              </select>
-            </div>
-            */}
 
             {isBranch && (
               <div>
@@ -2168,7 +2120,7 @@ export default function AdminScreen() {
                                   paddingAngle={3}
                                   dataKey="value"
                                 >
-                                  {chartData.map((entry, index) => (
+                                  {chartData.map((_, index) => (
                                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                   ))}
                                 </Pie>
@@ -2399,24 +2351,11 @@ export default function AdminScreen() {
                      <button type="button" onClick={downloadAccountTemplate} className="text-[10px] text-emerald-600 font-bold flex items-center border border-emerald-200 bg-emerald-50 px-3 py-2 rounded-lg justify-center flex-1 cursor-pointer">
                        <FileSpreadsheet size={14} className="mr-1.5" /> Tải mẫu CSV
                      </button>
-                     <label className="text-[10px] text-blue-600 font-bold flex items-center border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg cursor-pointer justify-center flex-1">
-                       <Upload size={14} className="mr-1.5" /> Upload CSV
-                       <input type="file" accept=".csv" className="hidden" onChange={handleBulkImport} disabled={creatingAccount} />
+                     <label className="text-[10px] text-blue-600 font-bold flex items-center border border-blue-200 bg-blue-50 px-3 py-2 rounded-lg cursor-pointer justify-center flex-1 hover:bg-blue-100 transition">
+                       <Upload size={14} className="mr-1.5" /> Chọn File CSV Để Tải Lên
+                       <input type="file" accept=".csv" className="hidden" onChange={handleBulkImport} disabled={isImportingConfirmed} />
                      </label>
                   </div>
-                  {isAdmin && (
-                    <div className="mt-2.5 pt-2.5 border-t border-slate-100">
-                      <button
-                        type="button"
-                        onClick={handleImportPreloaded25DTV_DKD}
-                        disabled={creatingAccount}
-                        className="w-full text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-2 rounded-lg flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-                      >
-                        <Sparkles size={14} className="text-indigo-600" /> Nạp ngay 114 sinh viên lớp 25DTV_DKD (Dữ liệu đính kèm)
-                      </button>
-                    </div>
-                  )}
-                  {creatingAccount && <div className="text-xs text-center mt-2 text-blue-600 font-medium">Đang tiến hành cập nhật/import dữ liệu đoàn viên, xin vui lòng đợi...</div>}
                 </div>
               </>
             )}
@@ -2934,7 +2873,7 @@ export default function AdminScreen() {
                                         <Check size={9} />
                                       </button>
                                       <button 
-                                        onClick={() => handleReject(penAct.id, penAct.name, penAct.targetAudience || 'all')}
+                                        onClick={() => handleReject(penAct.id, penAct.name)}
                                         className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded shadow-sm cursor-pointer transition"
                                         title="Từ chối"
                                       >
@@ -3501,6 +3440,144 @@ export default function AdminScreen() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Import Preview & Confirmation Modal */}
+      {csvPreview && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white w-full max-w-4xl rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="flex justify-between items-start pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">
+                    Xem trước danh sách dữ liệu CSV nhận được
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                    <span>File: <strong className="text-slate-700">{csvPreview.fileName}</strong></span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isImportingConfirmed}
+                onClick={() => setCsvPreview(null)}
+                className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Statistics Badges */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-3 shrink-0">
+              <div className="bg-slate-50 border border-slate-200/80 p-2.5 rounded-xl">
+                <div className="text-[10px] text-slate-500 font-bold uppercase">Tổng số nhận diện</div>
+                <div className="text-lg font-extrabold text-blue-600">{csvPreview.records.length} <span className="text-xs font-medium text-slate-500">đoàn viên</span></div>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200/80 p-2.5 rounded-xl">
+                <div className="text-[10px] text-emerald-700 font-bold uppercase">Tạo mới hồ sơ</div>
+                <div className="text-lg font-extrabold text-emerald-600">+{csvPreview.totalNew}</div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200/80 p-2.5 rounded-xl">
+                <div className="text-[10px] text-blue-700 font-bold uppercase">Cập nhật tài khoản có sẵn</div>
+                <div className="text-lg font-extrabold text-blue-600">{csvPreview.totalExisting}</div>
+              </div>
+              <div className="bg-amber-50 border border-amber-200/80 p-2.5 rounded-xl">
+                <div className="text-[10px] text-amber-700 font-bold uppercase">Chi đoàn / Lớp</div>
+                <div className="text-xs font-extrabold text-amber-800 truncate" title={csvPreview.branchesList.join(', ')}>
+                  {csvPreview.branchesList.length > 0 ? csvPreview.branchesList.join(', ') : 'Chưa xác định'}
+                </div>
+              </div>
+            </div>
+
+            {/* Explanatory note */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] text-slate-600 mb-3 shrink-0 flex items-center justify-between">
+              <span>Hệ thống đã tự động định dạng và phục hồi dấu tiếng Việt cho các hồ sơ. Vui lòng kiểm tra danh sách trước khi xác nhận lưu vào máy chủ.</span>
+              <span className="text-slate-400 font-medium text-[10px] shrink-0 ml-2">Hiển thị {csvPreview.records.length} bản ghi</span>
+            </div>
+
+            {/* Scrollable Preview Table */}
+            <div className="flex-1 overflow-y-auto border border-slate-200 rounded-2xl no-scrollbar min-h-[220px]">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-100 text-slate-700 font-bold uppercase text-[10px] tracking-wider sticky top-0 z-10 border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3 w-12 text-center">STT</th>
+                    <th className="py-2.5 px-3 w-28">MSSV</th>
+                    <th className="py-2.5 px-3">Họ và tên</th>
+                    <th className="py-2.5 px-3 w-32">Chi đoàn / Lớp</th>
+                    <th className="py-2.5 px-3 w-24">Vai trò</th>
+                    <th className="py-2.5 px-3 w-32 text-center">Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {csvPreview.records.map((r, idx) => (
+                    <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
+                      <td className="py-2 px-3 text-slate-400 text-center text-[11px]">{r.stt}</td>
+                      <td className="py-2 px-3 font-mono font-bold text-slate-800">{r.mssv}</td>
+                      <td className="py-2 px-3 font-bold text-slate-900">{r.name}</td>
+                      <td className="py-2 px-3">
+                        <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-semibold border border-slate-200/60">
+                          {r.branch}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-slate-600 text-[11px]">
+                        {r.role === 'chidoan' ? 'Chi đoàn' : 'Đoàn viên'}
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        {r.isExisting ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                            🔄 Cập nhật
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                            🆕 Tạo mới
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 mt-3">
+              <div className="text-xs text-slate-500 font-medium">
+                {isImportingConfirmed ? (
+                  <span className="text-blue-600 font-bold flex items-center gap-1.5">
+                    <span className="inline-block w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                    Đang nạp dữ liệu ({importProgress ? `${importProgress.current}/${importProgress.total}` : 'Đang xử lý...'}), vui lòng không đóng trang...
+                  </span>
+                ) : (
+                  <span>Bấm nút bên phải để xác nhận lưu toàn bộ dữ liệu vào Firestore</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  disabled={isImportingConfirmed}
+                  onClick={() => setCsvPreview(null)}
+                  className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs transition cursor-pointer disabled:opacity-50"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  disabled={isImportingConfirmed}
+                  onClick={handleConfirmBulkImport}
+                  className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white text-xs shadow-md transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <CheckCircle2 size={16} />
+                  <span>{isImportingConfirmed ? 'Đang nạp dữ liệu...' : `Xác nhận nhập (${csvPreview.records.length} đoàn viên)`}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@ import { Bell, LogOut, CalendarCheck2, KeyRound, X, CheckCircle2, Camera, Upload
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, auth, isQuotaExceededError } from '../lib/firebase';
-import { collection, query, getDocs, doc, setDoc, deleteDoc, orderBy, getDoc } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, orderBy, getDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
 import { isTermExpired, formatDateToDDMMYYYY } from '../utils/termUtils';
 
@@ -60,14 +60,6 @@ export default function HomeScreen() {
     setDismissedNotifs(prev => {
       const allIds = notifications.map(n => n.id);
       const newNotifs = Array.from(new Set([...prev, ...allIds]));
-      localStorage.setItem('dismissedNotifs', JSON.stringify(newNotifs));
-      return newNotifs;
-    });
-  };
-
-  const handleDismissNotif = (id: string) => {
-    setDismissedNotifs(prev => {
-      const newNotifs = [...prev, id];
       localStorage.setItem('dismissedNotifs', JSON.stringify(newNotifs));
       return newNotifs;
     });

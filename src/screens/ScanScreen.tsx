@@ -18,7 +18,6 @@ import {
   X,
   Maximize2,
   Minimize2,
-  Settings,
   Sliders
 } from 'lucide-react';
 

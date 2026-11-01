@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithPopup,
@@ -9,7 +8,7 @@ import {
 } from 'firebase/auth';
 import { collection, query, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { Lock, AlertCircle, User as UserIcon, LogIn, UserPlus, Users, CheckCircle2 } from 'lucide-react';
+import { Lock, AlertCircle, User as UserIcon, LogIn, Users } from 'lucide-react';
 
 const DEFAULT_BRANCHES = [
   '25ICD', '25DTV1', '25DTV2', '25DTV_DKD',
@@ -18,10 +17,7 @@ const DEFAULT_BRANCHES = [
 
 export default function LoginScreen() {
   const [activeTab, setActiveTab] = useState<'doanvien' | 'bch'>('doanvien');
-  const [isSignUp, setIsSignUp] = useState(false);
   const [loginId, setLoginId] = useState('');
-  const [selectedBranch, setSelectedBranch] = useState('25ICD');
-  const [customBranch, setCustomBranch] = useState('');
   const [branchOptions, setBranchOptions] = useState<string[]>(DEFAULT_BRANCHES);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');

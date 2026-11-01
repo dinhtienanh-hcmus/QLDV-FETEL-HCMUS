@@ -80,7 +80,6 @@ export default function HandbookScreen() {
   const { currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
   const isBranch = currentUser?.role === 'chidoan';
-  const isDoanVien = !isAdmin && !isBranch;
 
   // Main Sub-Tabs inside HandbookScreen
   const [activeSubTab, setActiveSubTab] = useState<'handbook' | 'ideas' | 'tntt'>('handbook');
