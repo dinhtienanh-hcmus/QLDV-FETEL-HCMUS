@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, writeBatch } from 'firebase/firestore';
-import { db, firebaseConfig, isQuotaExceededError } from '../lib/firebase';
+import { db, firebaseConfig, isQuotaExceededError, isOfflineOrNetworkError } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, ExternalLink, QrCode, CheckCircle2, Clock } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, ExternalLink, QrCode, CheckCircle2, Clock, RefreshCw, Link2, Unlink, Sparkles, Settings, Mail, Send, Paperclip, FileText, Download, CheckSquare, Square, CornerUpRight, Inbox, Eye, AlertCircle } from 'lucide-react';
 import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
 import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY } from '../utils/termUtils';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { getGoogleSheetsAccessToken, hasCachedToken, createTrackingSpreadsheet, syncTrackingSpreadsheet, extractSpreadsheetId } from '../lib/googleSheets';
+import { getGmailAccessToken, getCachedGmailToken, getCachedGmailEmail, hasCachedGmailToken, fetchRecentEmails, fetchAttachmentContent, sendBulkNotificationEmail, GmailMessageSummary, EmailAttachment } from '../lib/gmail';
 
 const VIETNAMESE_REPAIR_MAP: Record<string, string> = {
   'Ph?m': 'Phạm', 'Nguy?n': 'Nguyễn', 'B?o': 'Bảo', 'H?i': 'Hải', 'Ðang': 'Đăng', 'Qu?c': 'Quốc',
@@ -118,7 +120,7 @@ export default function AdminScreen() {
     return false;
   };
 
-  const [activeTab, setActiveTab] = useState<'activities' | 'users' | 'bch' | 'handbook' | 'branches' | 'tracking'>('activities');
+  const [activeTab, setActiveTab] = useState<'activities' | 'users' | 'bch' | 'handbook' | 'branches' | 'tracking' | 'notifications'>('activities');
   const [trackingSemester, setTrackingSemester] = useState<string>('all');
   const [trackingYear, setTrackingYear] = useState<string>('2026-2027');
   const [trackingSearch, setTrackingSearch] = useState<string>('');
@@ -128,6 +130,32 @@ export default function AdminScreen() {
   const [userSearch, setUserSearch] = useState('');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
   const [searchBch, setSearchBch] = useState('');
+
+  // Gmail & Announcements State
+  const [gmailConnectedEmail, setGmailConnectedEmail] = useState<string | null>(() => getCachedGmailEmail());
+  const [isConnectingGmail, setIsConnectingGmail] = useState(false);
+  const [isFetchingEmails, setIsFetchingEmails] = useState(false);
+  const [recentEmails, setRecentEmails] = useState<GmailMessageSummary[]>([]);
+  const [emailSearchQuery, setEmailSearchQuery] = useState('from:doantruong OR "Đoàn trường" OR "Thông báo" OR "KHTN"');
+  const [selectedEmailSource, setSelectedEmailSource] = useState<GmailMessageSummary | null>(null);
+
+  // Compose / Forward state
+  const [announceTitle, setAnnounceTitle] = useState('');
+  const [announceBody, setAnnounceBody] = useState('');
+  const [announceTarget, setAnnounceTarget] = useState<'branches' | 'all' | 'custom'>('branches');
+  const [selectedBranchesForMail, setSelectedBranchesForMail] = useState<string[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ filename: string; mimeType: string; size: number; dataBase64?: string; attachmentId?: string; messageId?: string }>>([]);
+  const [sendViaInApp, setSendViaInApp] = useState(true);
+  const [sendViaGmail, setSendViaGmail] = useState(true);
+
+  // Sending status & confirmation modal
+  const [showSendConfirmModal, setShowSendConfirmModal] = useState(false);
+  const [isSendingAnnouncement, setIsSendingAnnouncement] = useState(false);
+  const [sendResultMsg, setSendResultMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  
+  // Historical announcements list
+  const [announcementsList, setAnnouncementsList] = useState<any[]>([]);
+  const [loadingAnnouncements, setLoadingAnnouncements] = useState(false);
 
   const [branches, setBranches] = useState<any[]>([]);
   const [newBranchName, setNewBranchName] = useState('');
@@ -212,6 +240,29 @@ export default function AdminScreen() {
   const [isImportingConfirmed, setIsImportingConfirmed] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
 
+  // Google Sheets Integration
+  const [sheetsConfig, setSheetsConfig] = useState<{
+    spreadsheetId?: string;
+    spreadsheetUrl?: string;
+    title?: string;
+    lastSyncedAt?: number;
+    autoSyncOnApprove?: boolean;
+    syncedBy?: string;
+  } | null>(null);
+  const [isConnectingSheets, setIsConnectingSheets] = useState(false);
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [sheetsSyncSuccessMsg, setSheetsSyncSuccessMsg] = useState('');
+  const [sheetsSyncErrorMsg, setSheetsSyncErrorMsg] = useState('');
+  const [showLinkCustomModal, setShowLinkCustomModal] = useState(false);
+  const [customSheetInput, setCustomSheetInput] = useState('');
+
+  useEffect(() => {
+    if (sheetsSyncSuccessMsg) {
+      const timer = setTimeout(() => setSheetsSyncSuccessMsg(''), 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [sheetsSyncSuccessMsg]);
+
   useEffect(() => {
     try {
       const cachedUsers = localStorage.getItem('cached_admin_users');
@@ -240,26 +291,43 @@ export default function AdminScreen() {
       if (cachedActs) setActivities(JSON.parse(cachedActs));
       const cachedBranches = localStorage.getItem('cached_admin_branches');
       if (cachedBranches) setBranches(JSON.parse(cachedBranches));
+      const cachedTerms = localStorage.getItem('cached_bch_terms');
+      if (cachedTerms) {
+        try {
+          const parsedTerms = JSON.parse(cachedTerms);
+          if (Array.isArray(parsedTerms.doanKhoaTerms)) setDoanKhoaTerms(parsedTerms.doanKhoaTerms);
+          if (Array.isArray(parsedTerms.doanKhoaPeriods)) setDoanKhoaPeriods(parsedTerms.doanKhoaPeriods);
+          if (Array.isArray(parsedTerms.chiDoanTerms)) setChiDoanTerms(parsedTerms.chiDoanTerms);
+        } catch {}
+      }
+      const cachedSheets = localStorage.getItem('cached_sheets_config');
+      if (cachedSheets) {
+        try {
+          setSheetsConfig(JSON.parse(cachedSheets));
+        } catch {}
+      }
     } catch {}
     fetchActivities();
     fetchUsers();
     fetchBchTerms();
+    fetchSheetsConfig();
     if (isAdmin || isBranch) {
       fetchBranches();
     }
     if (isAdmin) {
       fetchHandbookTopics();
+      fetchAnnouncements();
     }
   }, [currentUser, isAdmin, isBranch]);
 
   const fetchBchTerms = async () => {
+    let dkTerms = DEFAULT_DOAN_KHOA_TERMS;
+    let dkPeriods = DEFAULT_DOAN_KHOA_PERIODS;
+    let cdTerms = DEFAULT_CHI_DOAN_TERMS;
+
     try {
       const termsDocRef = doc(db, 'system', 'bch_terms');
       const termsDocSnap = await getDoc(termsDocRef);
-
-      let dkTerms = DEFAULT_DOAN_KHOA_TERMS;
-      let dkPeriods = DEFAULT_DOAN_KHOA_PERIODS;
-      let cdTerms = DEFAULT_CHI_DOAN_TERMS;
 
       if (termsDocSnap.exists()) {
         const data = termsDocSnap.data();
@@ -281,19 +349,420 @@ export default function AdminScreen() {
       setDoanKhoaPeriods(activeDkPeriods);
       setChiDoanTerms(activeCdTerms);
 
-      // Sync active cleaned list to Firestore
       try {
-        await setDoc(termsDocRef, {
+        localStorage.setItem('cached_bch_terms', JSON.stringify({
           doanKhoaTerms: activeDkTerms,
           doanKhoaPeriods: activeDkPeriods,
           chiDoanTerms: activeCdTerms,
-          updatedAt: Date.now()
-        }, { merge: true });
-      } catch (writeErr) {
-        console.warn("Không thể lưu cập nhật nhiệm kỳ lên Firestore:", writeErr);
+        }));
+      } catch {}
+
+      // Only sync to Firestore if admin and active list cleaned
+      if (isAdmin) {
+        try {
+          await setDoc(termsDocRef, {
+            doanKhoaTerms: activeDkTerms,
+            doanKhoaPeriods: activeDkPeriods,
+            chiDoanTerms: activeCdTerms,
+            updatedAt: Date.now()
+          }, { merge: true });
+        } catch (writeErr) {
+          if (!isOfflineOrNetworkError(writeErr) && !isQuotaExceededError(writeErr)) {
+            console.warn("Không thể lưu cập nhật nhiệm kỳ lên Firestore:", writeErr);
+          }
+        }
       }
-    } catch (e) {
-      console.error("Lỗi tải/dọn dẹp danh sách nhiệm kỳ:", e);
+    } catch (e: any) {
+      if (isOfflineOrNetworkError(e) || isQuotaExceededError(e)) {
+        console.warn("Đang chạy ở chế độ ngoại tuyến (sử dụng danh sách nhiệm kỳ mặc định/bộ nhớ đệm).");
+      } else {
+        console.warn("Không thể tải danh sách nhiệm kỳ từ Firestore, sử dụng danh sách mặc định:", e);
+      }
+    }
+  };
+
+  const fetchSheetsConfig = async () => {
+    try {
+      const cfgDoc = await getDoc(doc(db, 'system', 'sheets_config'));
+      if (cfgDoc.exists()) {
+        const data = cfgDoc.data() as any;
+        setSheetsConfig(data);
+        try {
+          localStorage.setItem('cached_sheets_config', JSON.stringify(data));
+        } catch {}
+      }
+    } catch (err) {
+      if (!isOfflineOrNetworkError(err) && !isQuotaExceededError(err)) {
+        console.warn("Error loading sheets_config:", err);
+      }
+    }
+  };
+
+  const handleCreateGoogleSheet = async () => {
+    setIsConnectingSheets(true);
+    setSheetsSyncErrorMsg('');
+    setSheetsSyncSuccessMsg('');
+    try {
+      const token = await getGoogleSheetsAccessToken(true);
+      const res = await createTrackingSpreadsheet(token, {
+        title: 'Bảng Theo Dõi & Quản Lý Hoạt Động Chi Đoàn - FETEL',
+        branches,
+        activities,
+        usersList,
+        semesterFilter: trackingSemester,
+        yearFilter: trackingYear,
+      });
+
+      const newConfig = {
+        spreadsheetId: res.spreadsheetId,
+        spreadsheetUrl: res.spreadsheetUrl,
+        title: 'Bảng Theo Dõi & Quản Lý Hoạt Động Chi Đoàn - FETEL',
+        lastSyncedAt: Date.now(),
+        autoSyncOnApprove: true,
+        syncedBy: currentUser?.email || currentUser?.name || 'Admin',
+      };
+
+      await setDoc(doc(db, 'system', 'sheets_config'), newConfig);
+      setSheetsConfig(newConfig);
+      setSheetsSyncSuccessMsg('✅ Đã tạo thành công Google Sheet và đồng bộ toàn bộ dữ liệu!');
+    } catch (err: any) {
+      console.error('Lỗi tạo Google Sheet:', err);
+      setSheetsSyncErrorMsg(err?.message || 'Không thể tạo Google Sheet. Vui lòng cấp quyền hoặc thử lại!');
+    } finally {
+      setIsConnectingSheets(false);
+    }
+  };
+
+  const handleSyncToGoogleSheet = async () => {
+    if (!sheetsConfig?.spreadsheetId) return;
+    setIsSyncingSheets(true);
+    setSheetsSyncErrorMsg('');
+    setSheetsSyncSuccessMsg('');
+    try {
+      let token: string;
+      if (hasCachedToken()) {
+        token = await getGoogleSheetsAccessToken(false);
+      } else {
+        token = await getGoogleSheetsAccessToken(true);
+      }
+      await syncTrackingSpreadsheet(token, sheetsConfig.spreadsheetId, {
+        branches,
+        activities,
+        usersList,
+        semesterFilter: trackingSemester,
+        yearFilter: trackingYear,
+      });
+
+      const updatedConfig = {
+        ...sheetsConfig,
+        lastSyncedAt: Date.now(),
+        syncedBy: currentUser?.email || currentUser?.name || 'Admin',
+      };
+      await setDoc(doc(db, 'system', 'sheets_config'), updatedConfig, { merge: true });
+      setSheetsConfig(updatedConfig);
+      setSheetsSyncSuccessMsg('✅ Đã đồng bộ toàn bộ bảng theo dõi lên Google Sheet thành công!');
+    } catch (err: any) {
+      console.error('Lỗi đồng bộ Google Sheet:', err);
+      setSheetsSyncErrorMsg(err?.message || 'Lỗi khi đồng bộ lên Google Sheet. Vui lòng thử lại!');
+    } finally {
+      setIsSyncingSheets(false);
+    }
+  };
+
+  const handleLinkCustomSheet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customSheetInput.trim()) return;
+    const cleanId = extractSpreadsheetId(customSheetInput);
+    if (!cleanId) {
+      alert('Vui lòng nhập ID hoặc link hợp lệ của Google Sheet!');
+      return;
+    }
+
+    setIsConnectingSheets(true);
+    setSheetsSyncErrorMsg('');
+    setSheetsSyncSuccessMsg('');
+    try {
+      const token = await getGoogleSheetsAccessToken(true);
+      await syncTrackingSpreadsheet(token, cleanId, {
+        branches,
+        activities,
+        usersList,
+        semesterFilter: trackingSemester,
+        yearFilter: trackingYear,
+      });
+
+      const newConfig = {
+        spreadsheetId: cleanId,
+        spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${cleanId}/edit`,
+        title: 'Bảng Theo Dõi & Quản Lý Hoạt Động Chi Đoàn - FETEL',
+        lastSyncedAt: Date.now(),
+        autoSyncOnApprove: true,
+        syncedBy: currentUser?.email || currentUser?.name || 'Admin',
+      };
+
+      await setDoc(doc(db, 'system', 'sheets_config'), newConfig);
+      setSheetsConfig(newConfig);
+      setShowLinkCustomModal(false);
+      setCustomSheetInput('');
+      setSheetsSyncSuccessMsg('✅ Đã liên kết và đồng bộ thành công với Google Sheet!');
+    } catch (err: any) {
+      console.error('Lỗi liên kết Google Sheet:', err);
+      setSheetsSyncErrorMsg(err?.message || 'Không thể liên kết với Sheet này. Vui lòng kiểm tra quyền truy cập!');
+    } finally {
+      setIsConnectingSheets(false);
+    }
+  };
+
+  const handleToggleAutoSync = async () => {
+    if (!sheetsConfig?.spreadsheetId) return;
+    const newAutoSync = !sheetsConfig.autoSyncOnApprove;
+    const updated = { ...sheetsConfig, autoSyncOnApprove: newAutoSync };
+    setSheetsConfig(updated);
+    try {
+      await setDoc(doc(db, 'system', 'sheets_config'), { autoSyncOnApprove: newAutoSync }, { merge: true });
+    } catch (err) {
+      console.warn('Lỗi lưu cài đặt auto-sync:', err);
+    }
+  };
+
+  const handleUnlinkSheet = async () => {
+    if (!window.confirm('Bạn có chắc muốn hủy liên kết Google Sheet này? (Bảng tính trên Google Drive của bạn vẫn được giữ nguyên)')) return;
+    try {
+      await deleteDoc(doc(db, 'system', 'sheets_config'));
+      setSheetsConfig(null);
+      setSheetsSyncSuccessMsg('Đã hủy liên kết Google Sheet.');
+    } catch (err) {
+      console.error('Lỗi hủy liên kết:', err);
+    }
+  };
+
+  const fetchAnnouncements = async () => {
+    setLoadingAnnouncements(true);
+    try {
+      const q = query(collection(db, 'notifications'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAnnouncementsList(list);
+    } catch (err) {
+      if (!isOfflineOrNetworkError(err) && !isQuotaExceededError(err)) {
+        console.warn('Error fetching notifications:', err);
+      }
+    } finally {
+      setLoadingAnnouncements(false);
+    }
+  };
+
+  const handleConnectGmail = async () => {
+    setIsConnectingGmail(true);
+    setSendResultMsg(null);
+    try {
+      const res = await getGmailAccessToken(true, 'dkdtvt.hcmus@gmail.com');
+      setGmailConnectedEmail(res.email);
+      setSendResultMsg({ type: 'success', text: `Đã kết nối thành công với tài khoản Gmail: ${res.email}` });
+    } catch (e: any) {
+      console.warn('Lỗi kết nối Gmail:', e);
+      setSendResultMsg({ type: 'error', text: e.message || 'Không thể kết nối Gmail Đoàn khoa.' });
+    } finally {
+      setIsConnectingGmail(false);
+    }
+  };
+
+  const handleFetchEmails = async () => {
+    setIsFetchingEmails(true);
+    setSendResultMsg(null);
+    try {
+      let tokenInfo = hasCachedGmailToken()
+        ? await getGmailAccessToken(false, 'dkdtvt.hcmus@gmail.com')
+        : await getGmailAccessToken(true, 'dkdtvt.hcmus@gmail.com');
+      setGmailConnectedEmail(tokenInfo.email);
+      const emails = await fetchRecentEmails(tokenInfo.token, emailSearchQuery);
+      setRecentEmails(emails);
+      if (emails.length === 0) {
+        setSendResultMsg({ type: 'error', text: 'Không tìm thấy email nào phù hợp với từ khóa tìm kiếm.' });
+      }
+    } catch (e: any) {
+      console.warn('Lỗi tải email:', e);
+      setSendResultMsg({ type: 'error', text: e.message || 'Lỗi khi đọc email từ Gmail Đoàn khoa.' });
+    } finally {
+      setIsFetchingEmails(false);
+    }
+  };
+
+  const handleSelectEmailForForward = (msg: GmailMessageSummary) => {
+    setSelectedEmailSource(msg);
+    setAnnounceTitle(`[ĐOÀN KHOA ĐTVT - CHUYỂN TIẾP] ${msg.subject.replace(/^(re:|fwd:|fwd:)\s*/i, '')}`);
+    
+    const formattedIntro = `Kính gửi Ban Chấp hành các Chi đoàn trực thuộc,\n\nBan Chấp hành Đoàn khoa Điện tử - Viễn thông chuyển tiếp thông báo từ Đoàn trường Đại học Khoa học tự nhiên đến các Chi đoàn.\nĐề nghị các đồng chí Bí thư, Phó Bí thư và Ủy viên BCH Chi đoàn nghiên cứu nội dung và triển khai kịp thời đến đoàn viên sinh viên trong lớp.\n\n` +
+      `-----------------------------------------\n` +
+      `THÔNG TIN GỐC TỪ ĐOÀN TRƯỜNG:\n` +
+      `- Người gửi: ${msg.from}\n` +
+      `- Ngày gửi: ${msg.date}\n` +
+      `- Tiêu đề: ${msg.subject}\n` +
+      `-----------------------------------------\n\n` +
+      `${msg.bodyText}\n\n` +
+      `Trân trọng,\nBCH Đoàn khoa Điện tử - Viễn thông\nEmail: dkdtvt.hcmus@gmail.com`;
+
+    setAnnounceBody(formattedIntro);
+
+    if (msg.attachments && msg.attachments.length > 0) {
+      setAttachedFiles(msg.attachments.map(att => ({
+        filename: att.filename,
+        mimeType: att.mimeType,
+        size: att.size,
+        attachmentId: att.attachmentId,
+        messageId: msg.id
+      })));
+    } else {
+      setAttachedFiles([]);
+    }
+  };
+
+  const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    Array.from(files).forEach((file: File) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64Data = result.split(',')[1] || '';
+        setAttachedFiles(prev => [
+          ...prev,
+          {
+            filename: file.name,
+            mimeType: file.type || 'application/pdf',
+            size: file.size,
+            dataBase64: base64Data
+          }
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const handleRemoveAttachment = (index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const getRecipientEmailsList = (): string[] => {
+    const list: string[] = [];
+    const targetBranches = announceTarget === 'all' || announceTarget === 'branches'
+      ? branches.map(b => b.name)
+      : selectedBranchesForMail;
+
+    targetBranches.forEach(bName => {
+      const branchUsers = usersList.filter(u => 
+        u.branch && u.branch.trim().toLowerCase() === bName.trim().toLowerCase()
+      );
+      const bchUsers = branchUsers.filter(u => u.role === 'chidoan' || (u.branchRole && u.branchRole.trim() !== ''));
+      let foundEmail = false;
+      bchUsers.forEach(u => {
+        if (u.email && u.email.includes('@') && !u.email.endsWith('@chidoan.fetel')) {
+          if (!list.includes(u.email)) {
+            list.push(u.email);
+            foundEmail = true;
+          }
+        }
+      });
+      if (!foundEmail) {
+        const cleanName = bName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const defaultEmail = `bchchidoan${cleanName}@gmail.com`;
+        if (!list.includes(defaultEmail)) {
+          list.push(defaultEmail);
+        }
+      }
+    });
+
+    return list;
+  };
+
+  const handleExecuteSend = async () => {
+    if (!announceTitle.trim() || !announceBody.trim()) {
+      alert('Vui lòng nhập đầy đủ tiêu đề và nội dung thông báo!');
+      return;
+    }
+
+    if (!sendViaInApp && !sendViaGmail) {
+      alert('Vui lòng chọn ít nhất 01 hình thức gửi (Trên App hoặc qua Gmail)!');
+      return;
+    }
+
+    setIsSendingAnnouncement(true);
+    setSendResultMsg(null);
+    try {
+      let emailSuccess = 0;
+
+      // 1. In-App Notification
+      if (sendViaInApp) {
+        await addDoc(collection(db, 'notifications'), {
+          title: announceTitle,
+          message: announceBody,
+          targetAudience: announceTarget === 'all' ? 'all' : (announceTarget === 'branches' ? 'chidoan' : selectedBranchesForMail.join(', ')),
+          attachmentsCount: attachedFiles.length,
+          hasPdf: attachedFiles.some(f => f.filename.toLowerCase().endsWith('.pdf')),
+          sentBy: 'dkdtvt.hcmus@gmail.com',
+          createdAt: Date.now()
+        });
+      }
+
+      // 2. Gmail Send
+      if (sendViaGmail) {
+        let tokenInfo = hasCachedGmailToken()
+          ? await getGmailAccessToken(false, 'dkdtvt.hcmus@gmail.com')
+          : await getGmailAccessToken(true, 'dkdtvt.hcmus@gmail.com');
+        
+        setGmailConnectedEmail(tokenInfo.email);
+
+        // Resolve any pending attachment data
+        const resolvedAttachments: Array<{ filename: string; mimeType: string; dataBase64: string }> = [];
+        for (const att of attachedFiles) {
+          if (att.dataBase64) {
+            resolvedAttachments.push({
+              filename: att.filename,
+              mimeType: att.mimeType,
+              dataBase64: att.dataBase64
+            });
+          } else if (att.messageId && att.attachmentId) {
+            const fetchedBase64 = await fetchAttachmentContent(tokenInfo.token, att.messageId, att.attachmentId);
+            resolvedAttachments.push({
+              filename: att.filename,
+              mimeType: att.mimeType,
+              dataBase64: fetchedBase64
+            });
+          }
+        }
+
+        const recipientEmails = getRecipientEmailsList();
+        const res = await sendBulkNotificationEmail(tokenInfo.token, {
+          fromEmail: 'dkdtvt.hcmus@gmail.com',
+          fromName: 'BCH Đoàn khoa Điện tử - Viễn thông',
+          recipients: recipientEmails,
+          subject: announceTitle,
+          bodyText: announceBody,
+          attachments: resolvedAttachments
+        });
+        emailSuccess = res.successCount;
+      }
+
+      setShowSendConfirmModal(false);
+      setSendResultMsg({
+        type: 'success',
+        text: `Đã phát hành thông báo thành công!${sendViaGmail ? ` (Đã gửi email đến ${emailSuccess} địa chỉ BCH Chi đoàn từ dkdtvt.hcmus@gmail.com)` : ''}`
+      });
+      // Reset form
+      setAnnounceTitle('');
+      setAnnounceBody('');
+      setAttachedFiles([]);
+      setSelectedEmailSource(null);
+      fetchAnnouncements();
+    } catch (err: any) {
+      console.error('Lỗi phát hành thông báo:', err);
+      setSendResultMsg({
+        type: 'error',
+        text: err?.message || 'Không thể gửi thông báo. Vui lòng kiểm tra lại quyền truy cập Gmail!'
+      });
+    } finally {
+      setIsSendingAnnouncement(false);
     }
   };
 
@@ -1063,6 +1532,36 @@ export default function AdminScreen() {
         createdAt: Date.now()
       });
       fetchActivities();
+
+      // Tự động đồng bộ lên Google Sheet nếu đã liên kết
+      if (sheetsConfig?.spreadsheetId && sheetsConfig?.autoSyncOnApprove !== false) {
+        if (hasCachedToken()) {
+          try {
+            const token = await getGoogleSheetsAccessToken(false);
+            const updatedActs = activities.map(a => a.id === id ? { ...a, status: 'approved' as const, updatedAt: Date.now() } : a);
+            await syncTrackingSpreadsheet(token, sheetsConfig.spreadsheetId, {
+              branches,
+              activities: updatedActs,
+              usersList,
+              semesterFilter: trackingSemester,
+              yearFilter: trackingYear,
+            });
+            const updatedConfig = {
+              ...sheetsConfig,
+              lastSyncedAt: Date.now(),
+              syncedBy: currentUser?.email || currentUser?.name || 'Admin',
+            };
+            await setDoc(doc(db, 'system', 'sheets_config'), updatedConfig, { merge: true });
+            setSheetsConfig(updatedConfig);
+            setSheetsSyncSuccessMsg(`✅ Đã duyệt hoạt động và tự động cập nhật lên Google Sheet!`);
+          } catch (sheetErr) {
+            console.warn('Lỗi tự động sync Google Sheet:', sheetErr);
+            setSheetsSyncSuccessMsg(`✅ Đã duyệt hoạt động! (Nhấn "Đồng bộ lại" ở tab Theo dõi để cập nhật trang tính)`);
+          }
+        } else {
+          setSheetsSyncSuccessMsg(`✅ Đã duyệt hoạt động "${actName}"! (Nhấn "Đồng bộ toàn bộ" ở tab Theo dõi để cập nhật lên Google Sheet)`);
+        }
+      }
     } catch (err) {
       console.error(err);
     }
@@ -1681,6 +2180,15 @@ export default function AdminScreen() {
                 className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition ${activeTab === 'tracking' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
               >
                 Bảng hoạt động
+              </button>
+            )}
+            {isAdmin && (
+              <button 
+                onClick={() => setActiveTab('notifications')}
+                className={`pb-2 shrink-0 text-xs font-bold uppercase tracking-wide border-b-2 transition flex items-center gap-1.5 ${activeTab === 'notifications' ? 'border-white text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+              >
+                <Mail size={13} />
+                Thông báo & Gmail
               </button>
             )}
           </div>
@@ -2779,6 +3287,154 @@ export default function AdminScreen() {
               </div>
             </div>
 
+            {/* Google Sheets Integration Card */}
+            <div className="mb-5 bg-gradient-to-r from-emerald-50 via-teal-50/60 to-emerald-50 border border-emerald-200/80 rounded-2xl p-4 shadow-xs">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                    <FileSpreadsheet size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                        Google Sheets Tự Động Đồng Bộ
+                      </h4>
+                      {sheetsConfig?.spreadsheetId ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-300">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Đã kết nối Google Sheet
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-500 bg-white/80 px-2 py-0.5 rounded-full border border-slate-200">
+                          Chưa liên kết
+                        </span>
+                      )}
+                    </div>
+                    {sheetsConfig?.spreadsheetId ? (
+                      <div className="mt-1 space-y-1">
+                        <p className="text-[11px] text-slate-600 font-medium">
+                          Bảng tính:{' '}
+                          <a 
+                            href={sheetsConfig.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sheetsConfig.spreadsheetId}/edit`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-bold text-emerald-700 hover:text-emerald-900 underline inline-flex items-center gap-1"
+                          >
+                            {sheetsConfig.title || 'Bảng Theo Dõi & Quản Lý Hoạt Động Chi Đoàn - FETEL'}
+                            <ExternalLink size={11} />
+                          </a>
+                        </p>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-slate-500">
+                          {sheetsConfig.lastSyncedAt && (
+                            <span className="flex items-center gap-1">
+                              <Clock size={11} className="text-slate-400" />
+                              Lần đồng bộ gần nhất:{' '}
+                              <strong className="text-slate-700">
+                                {new Date(sheetsConfig.lastSyncedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}{' '}
+                                {formatDateToDDMMYYYY(sheetsConfig.lastSyncedAt)}
+                              </strong>
+                            </span>
+                          )}
+                          <label className="flex items-center gap-1.5 cursor-pointer text-slate-700 font-semibold select-none">
+                            <input 
+                              type="checkbox" 
+                              checked={sheetsConfig.autoSyncOnApprove !== false} 
+                              onChange={handleToggleAutoSync}
+                              className="rounded text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer"
+                            />
+                            <span>Tự động cập nhật khi duyệt hoạt động (Real-time)</span>
+                          </label>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-600 mt-1 max-w-xl">
+                        Tự động đồng bộ bảng theo dõi và lưu trữ nhật ký hoạt động chính thức của các Chi đoàn lên Google Sheet của bạn mỗi khi Admin duyệt hoạt động.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-wrap items-center gap-2 self-start lg:self-center shrink-0">
+                  {sheetsConfig?.spreadsheetId ? (
+                    <>
+                      <a
+                        href={sheetsConfig.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${sheetsConfig.spreadsheetId}/edit`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <ExternalLink size={13} />
+                        Mở Google Sheet
+                      </a>
+                      <button
+                        type="button"
+                        onClick={handleSyncToGoogleSheet}
+                        disabled={isSyncingSheets}
+                        className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        title="Đồng bộ lại toàn bộ dữ liệu mới nhất lên Google Sheet"
+                      >
+                        <RefreshCw size={13} className={isSyncingSheets ? 'animate-spin text-emerald-600' : 'text-slate-500'} />
+                        {isSyncingSheets ? 'Đang đồng bộ...' : 'Đồng bộ toàn bộ'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleUnlinkSheet}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                        title="Hủy liên kết Google Sheet"
+                      >
+                        <Unlink size={15} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleCreateGoogleSheet}
+                        disabled={isConnectingSheets}
+                        className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                      >
+                        {isConnectingSheets ? (
+                          <>
+                            <RefreshCw size={14} className="animate-spin" />
+                            Đang tạo bảng tính...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={14} />
+                            Tạo Google Sheet mới
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowLinkCustomModal(true)}
+                        disabled={isConnectingSheets}
+                        className="px-3.5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Link2 size={14} className="text-slate-500" />
+                        Liên kết Sheet có sẵn
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Feedback messages */}
+              {sheetsSyncSuccessMsg && (
+                <div className="mt-3 p-2.5 bg-emerald-100/80 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
+                  <span>{sheetsSyncSuccessMsg}</span>
+                </div>
+              )}
+              {sheetsSyncErrorMsg && (
+                <div className="mt-3 p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-medium flex items-center gap-2 animate-fadeIn">
+                  <X size={16} className="text-rose-600 shrink-0" />
+                  <span>{sheetsSyncErrorMsg}</span>
+                </div>
+              )}
+            </div>
+
             {/* Filter controls */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5 p-3.5 bg-slate-50/80 rounded-xl border border-slate-100">
               <div>
@@ -3017,6 +3673,390 @@ export default function AdminScreen() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'notifications' && isAdmin && (
+          <div className="space-y-5 animate-fadeIn">
+            {/* Header */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 pb-3 border-b border-slate-100">
+                <div>
+                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-2 uppercase tracking-wide">
+                    <Mail size={18} className="text-blue-600" />
+                    Trung tâm Phát hành Thông báo & Chuyển tiếp Gmail
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-1 font-medium">
+                    Nhập/trích xuất thông báo từ Đoàn trường, tùy chỉnh nội dung và gửi hàng loạt cho BCH Chi đoàn qua Ứng dụng & Hòm thư chính thức <strong className="text-blue-600 font-bold">dkdtvt.hcmus@gmail.com</strong>.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <span className="bg-blue-50 text-blue-700 font-bold text-[11px] px-3 py-1.5 rounded-xl border border-blue-100 flex items-center gap-1.5">
+                    🏫 {branches.length} Chi đoàn trực thuộc
+                  </span>
+                </div>
+              </div>
+
+              {/* Status Banner for dkdtvt.hcmus@gmail.com */}
+              <div className="mt-4 p-4 rounded-xl bg-gradient-to-r from-blue-50 via-indigo-50/50 to-blue-50 border border-blue-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                    <Mail size={18} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-800">
+                        Tài khoản gửi: <strong className="text-blue-700">dkdtvt.hcmus@gmail.com</strong>
+                      </span>
+                      {gmailConnectedEmail ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Đã cấp quyền ({gmailConnectedEmail})
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                          Chưa kết nối
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Email chuyển tiếp sẽ được gửi chính thức từ hộp thư Đoàn khoa ĐTVT đến các Bí thư & BCH Chi đoàn.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleConnectGmail}
+                  disabled={isConnectingGmail}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white hover:bg-slate-50 text-blue-700 border border-blue-300 shadow-xs transition flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  <RefreshCw size={13} className={isConnectingGmail ? 'animate-spin' : ''} />
+                  {isConnectingGmail ? 'Đang kết nối...' : (gmailConnectedEmail ? 'Đổi / Đăng nhập lại' : 'Kết nối Gmail Đoàn khoa')}
+                </button>
+              </div>
+
+              {/* Feedback Alert */}
+              {sendResultMsg && (
+                <div className={`mt-3 p-3 rounded-xl text-xs font-semibold flex items-center gap-2 animate-fadeIn ${
+                  sendResultMsg.type === 'success' ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-rose-100 text-rose-900 border border-rose-300'
+                }`}>
+                  {sendResultMsg.type === 'success' ? <CheckCircle2 size={16} className="text-emerald-700 shrink-0" /> : <AlertCircle size={16} className="text-rose-700 shrink-0" />}
+                  <span>{sendResultMsg.text}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Step 1: Fetch from Đoàn trường */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                <div>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                    <Inbox size={16} className="text-indigo-600" />
+                    Bước 1: Tìm kiếm & Đọc email từ Đoàn trường (Tùy chọn)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Tải danh sách thư mới nhất từ Đoàn trường để tự động trích xuất nội dung và các file PDF đính kèm.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                <input
+                  type="text"
+                  placeholder="Từ khóa tìm kiếm (VD: from:doantruong, Thông báo, KHTN...)"
+                  value={emailSearchQuery}
+                  onChange={e => setEmailSearchQuery(e.target.value)}
+                  className="flex-1 text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 font-medium"
+                />
+                <button
+                  type="button"
+                  onClick={handleFetchEmails}
+                  disabled={isFetchingEmails}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                >
+                  <RefreshCw size={13} className={isFetchingEmails ? 'animate-spin' : ''} />
+                  {isFetchingEmails ? 'Đang đọc Gmail...' : 'Tải email từ Đoàn trường'}
+                </button>
+              </div>
+
+              {recentEmails.length > 0 && (
+                <div className="space-y-2 mt-3 max-h-[280px] overflow-y-auto pr-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Danh sách thư tìm thấy ({recentEmails.length}):
+                  </span>
+                  {recentEmails.map(msg => (
+                    <div 
+                      key={msg.id} 
+                      className={`p-3 rounded-xl border transition flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 ${
+                        selectedEmailSource?.id === msg.id 
+                          ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-200' 
+                          : 'bg-slate-50/60 border-slate-200/80 hover:bg-slate-100/70'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-800 line-clamp-1">{msg.subject}</span>
+                          {msg.attachments.length > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200 shrink-0">
+                              <Paperclip size={10} />
+                              {msg.attachments.length} file đính kèm (PDF)
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+                          Từ: <strong className="text-slate-600">{msg.from}</strong> • {msg.date}
+                        </p>
+                        <p className="text-[11px] text-slate-600 mt-1 line-clamp-2 italic">
+                          "{msg.snippet}"
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSelectEmailForForward(msg)}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold shadow-xs transition shrink-0 flex items-center gap-1 cursor-pointer"
+                      >
+                        <CornerUpRight size={12} />
+                        Dùng làm mẫu chuyển tiếp
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Step 2: Compose & Forward */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+              <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                <Edit2 size={16} className="text-blue-600" />
+                Bước 2: Biên soạn & Tùy biến nội dung thông báo
+              </h4>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1 ml-0.5">
+                    Tiêu đề thông báo / Tiêu đề Email
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: [ĐOÀN KHOA ĐTVT] Triển khai thông báo tham gia Ngày hội Tuổi trẻ Sáng tạo..."
+                    value={announceTitle}
+                    onChange={e => setAnnounceTitle(e.target.value)}
+                    className="w-full text-xs p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white font-bold text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1 ml-0.5">
+                    Nội dung thông báo (Bạn có thể đổi câu chữ, bổ sung lưu ý, hạn chót cho Chi đoàn...)
+                  </label>
+                  <textarea
+                    rows={8}
+                    required
+                    placeholder="Kính gửi BCH các Chi đoàn trực thuộc,..."
+                    value={announceBody}
+                    onChange={e => setAnnounceBody(e.target.value)}
+                    className="w-full text-xs p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 focus:bg-white font-medium text-slate-700 leading-relaxed font-sans"
+                  />
+                </div>
+
+                {/* Attachments Section */}
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase ml-0.5 flex items-center gap-1">
+                      <Paperclip size={12} />
+                      Tệp đính kèm (File PDF / Văn bản đính kèm email): {attachedFiles.length} tệp
+                    </label>
+                    <label className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer">
+                      <Upload size={12} />
+                      + Thêm tệp PDF từ máy tính
+                      <input 
+                        type="file" 
+                        accept=".pdf,.doc,.docx,.png,.jpg" 
+                        multiple 
+                        className="hidden" 
+                        onChange={handleLocalFileUpload} 
+                      />
+                    </label>
+                  </div>
+
+                  {attachedFiles.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                      {attachedFiles.map((file, idx) => (
+                        <div key={idx} className="flex justify-between items-center p-2.5 bg-white rounded-lg border border-slate-200 shadow-xs">
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <div className="w-7 h-7 rounded bg-rose-100 text-rose-700 flex items-center justify-center font-bold text-[10px] shrink-0">
+                              PDF
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-800 truncate" title={file.filename}>{file.filename}</p>
+                              <p className="text-[10px] text-slate-400">
+                                {file.size ? `${(file.size / 1024).toFixed(1)} KB` : 'Tệp từ Gmail'}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAttachment(idx)}
+                            className="p-1 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                            title="Xóa tệp này"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center text-xs text-slate-400 italic">
+                      Chưa có tệp đính kèm. Bấm "+ Thêm tệp PDF từ máy tính" hoặc chọn thư từ Đoàn trường ở Bước 1.
+                    </div>
+                  )}
+                </div>
+
+                {/* Target Recipients */}
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                  <label className="text-[10px] font-bold text-slate-600 uppercase block">
+                    Đối tượng nhận thông báo & Email
+                  </label>
+                  <div className="flex flex-wrap gap-4 text-xs font-bold text-slate-700">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="announceTarget"
+                        checked={announceTarget === 'branches'}
+                        onChange={() => setAnnounceTarget('branches')}
+                        className="text-blue-600"
+                      />
+                      <span>Toàn bộ Ban Chấp hành Chi đoàn ({branches.length} Chi đoàn)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="announceTarget"
+                        checked={announceTarget === 'custom'}
+                        onChange={() => setAnnounceTarget('custom')}
+                        className="text-blue-600"
+                      />
+                      <span>Tùy chọn từng Chi đoàn cụ thể</span>
+                    </label>
+                  </div>
+
+                  {announceTarget === 'custom' && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-200">
+                      {branches.map(b => (
+                        <label key={b.id || b.name} className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 text-xs font-semibold cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedBranchesForMail.includes(b.name)}
+                            onChange={e => {
+                              if (e.target.checked) setSelectedBranchesForMail(prev => [...prev, b.name]);
+                              else setSelectedBranchesForMail(prev => prev.filter(x => x !== b.name));
+                            }}
+                            className="text-blue-600 rounded"
+                          />
+                          <span>{b.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Recipient preview */}
+                  <div className="text-[11px] text-slate-500 pt-1">
+                    Tổng cộng: <strong className="text-blue-700 font-bold">{getRecipientEmailsList().length} địa chỉ email BCH Chi đoàn</strong> sẽ nhận được thư:
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {getRecipientEmailsList().map((em, idx) => (
+                        <span key={idx} className="bg-white border border-slate-200 px-2 py-0.5 rounded text-[10.5px] font-mono text-slate-600">
+                          {em}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Delivery Channels */}
+                <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-xl space-y-2">
+                  <span className="text-[10px] font-bold text-blue-900 uppercase block">
+                    Kênh phát hành thông báo
+                  </span>
+                  <div className="flex flex-wrap gap-5 text-xs font-bold text-slate-800">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sendViaInApp}
+                        onChange={e => setSendViaInApp(e.target.checked)}
+                        className="rounded text-blue-600 h-4 w-4"
+                      />
+                      <span>Đăng lên Bảng tin Thông báo trong Ứng dụng</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={sendViaGmail}
+                        onChange={e => setSendViaGmail(e.target.checked)}
+                        className="rounded text-blue-600 h-4 w-4"
+                      />
+                      <span>Gửi email hàng loạt từ dkdtvt.hcmus@gmail.com qua Gmail</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Submit button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!announceTitle.trim() || !announceBody.trim()) {
+                      alert('Vui lòng nhập đầy đủ tiêu đề và nội dung thông báo!');
+                      return;
+                    }
+                    setShowSendConfirmModal(true);
+                  }}
+                  className="w-full py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white rounded-xl font-bold text-xs uppercase tracking-wider shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Send size={15} />
+                  <span>Xem lại & Phát hành thông báo hàng loạt</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Step 3: History of Announcements */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+              <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                <List size={16} className="text-slate-600" />
+                Lịch sử các thông báo đã phát hành ({announcementsList.length})
+              </h4>
+
+              {loadingAnnouncements ? (
+                <p className="text-xs text-slate-400 italic text-center py-4">Đang tải lịch sử thông báo...</p>
+              ) : announcementsList.length === 0 ? (
+                <p className="text-xs text-slate-400 italic text-center py-4">Chưa có thông báo nào được phát hành.</p>
+              ) : (
+                <div className="space-y-2">
+                  {announcementsList.map(a => (
+                    <div key={a.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-800">{a.title}</span>
+                          <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold">
+                            {a.targetAudience === 'all' ? 'Tất cả Đoàn viên' : (a.targetAudience === 'chidoan' ? 'Tất cả Chi đoàn' : a.targetAudience)}
+                          </span>
+                          {a.hasPdf && (
+                            <span className="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                              <Paperclip size={9} /> Có file PDF
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-1 line-clamp-2 whitespace-pre-wrap">{a.message}</p>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Phát hành: {formatDateToDDMMYYYY(a.createdAt)} • Người gửi: {a.sentBy || 'BCH Đoàn khoa'}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -3688,6 +4728,176 @@ export default function AdminScreen() {
                   <span>{isImportingConfirmed ? 'Đang nạp dữ liệu...' : `Xác nhận nhập (${csvPreview.records.length} đoàn viên)`}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLinkCustomModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl animate-scaleUp">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <FileSpreadsheet size={18} />
+                </div>
+                <h3 className="font-bold text-base text-slate-800">Liên kết Google Sheet có sẵn</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => { setShowLinkCustomModal(false); setSheetsSyncErrorMsg(''); }} 
+                className="text-slate-400 hover:text-slate-600 font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-4">
+              Nhập liên kết (URL) hoặc ID của bảng tính Google Sheet mà tài khoản Google của bạn có quyền chỉnh sửa. Hệ thống sẽ tự động cấu hình và đồng bộ dữ liệu vào bảng tính này.
+            </p>
+
+            <form onSubmit={handleLinkCustomSheet} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5 ml-0.5">
+                  Đường dẫn (URL) hoặc Spreadsheet ID
+                </label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="https://docs.google.com/spreadsheets/d/... hoặc ID"
+                  value={customSheetInput}
+                  onChange={e => setCustomSheetInput(e.target.value)}
+                  className="w-full text-xs p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 focus:bg-white font-medium"
+                />
+              </div>
+
+              {sheetsSyncErrorMsg && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium">
+                  {sheetsSyncErrorMsg}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isConnectingSheets}
+                  onClick={() => { setShowLinkCustomModal(false); setSheetsSyncErrorMsg(''); }}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isConnectingSheets || !customSheetInput.trim()}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isConnectingSheets ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      Đang kết nối...
+                    </>
+                  ) : (
+                    <>
+                      <Link2 size={14} />
+                      Xác nhận liên kết
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showSendConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl animate-scaleUp max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center">
+                  <Send size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-800">Xác nhận gửi thông báo hàng loạt</h3>
+                  <p className="text-[11px] text-slate-500">Kiểm tra thông tin trước khi phát hành</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowSendConfirmModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-700">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="text-[10px] font-bold text-slate-500 uppercase">Hộp thư gửi chính thức:</div>
+                <div className="font-bold text-blue-700 text-sm mt-0.5">BCH Đoàn khoa ĐTVT &lt;dkdtvt.hcmus@gmail.com&gt;</div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase">Tiêu đề:</div>
+                <div className="font-bold text-slate-800 mt-0.5">{announceTitle}</div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase">Danh sách người nhận ({getRecipientEmailsList().length} email):</div>
+                <div className="max-h-28 overflow-y-auto p-2 bg-slate-50 rounded-lg border border-slate-200 mt-1 font-mono text-[11px] text-slate-600 space-y-1">
+                  {getRecipientEmailsList().map((em, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <span className="text-slate-400">{idx + 1}.</span> {em}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {attachedFiles.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase">Tệp đính kèm ({attachedFiles.length}):</div>
+                  <div className="space-y-1 mt-1">
+                    {attachedFiles.map((f, idx) => (
+                      <span key={idx} className="inline-block mr-2 px-2 py-1 bg-rose-50 text-rose-700 rounded text-[11px] font-medium border border-rose-200">
+                        📎 {f.filename}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-[11.5px] font-medium">
+                ⚠️ Email sẽ được gửi trực tiếp từ hộp thư <strong>dkdtvt.hcmus@gmail.com</strong> đến các địa chỉ email trên và thông báo sẽ hiển thị ngay cho các Chi đoàn trên ứng dụng.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-4 mt-4 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isSendingAnnouncement}
+                onClick={() => setShowSendConfirmModal(false)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isSendingAnnouncement}
+                onClick={handleExecuteSend}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isSendingAnnouncement ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" />
+                    Đang gửi hàng loạt...
+                  </>
+                ) : (
+                  <>
+                    <Send size={14} />
+                    Xác nhận gửi ngay
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
