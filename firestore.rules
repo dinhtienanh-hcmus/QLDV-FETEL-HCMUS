@@ -62,8 +62,8 @@ service cloud.firestore {
 
     function isValidNotification(data) {
       return data.keys().hasAll(['title', 'message', 'targetAudience', 'createdAt']) &&
-             data.title is string && data.title.size() >= 1 && data.title.size() <= 256 &&
-             data.message is string && data.message.size() >= 1 && data.message.size() <= 1024 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 512 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 65536 &&
              data.targetAudience is string && data.targetAudience.size() >= 1 && data.targetAudience.size() <= 128 &&
              data.createdAt is number;
     }

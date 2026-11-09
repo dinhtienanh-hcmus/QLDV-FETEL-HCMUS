@@ -33,17 +33,30 @@ export async function getGoogleSheetsAccessToken(interactive = false): Promise<s
   const provider = new GoogleAuthProvider();
   SHEETS_SCOPES.forEach(scope => provider.addScope(scope));
 
-  // Request fresh credentials with scopes
-  const result = await signInWithPopup(auth, provider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  const token = credential?.accessToken;
+  try {
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken;
 
-  if (!token) {
-    throw new Error('Không nhận được mã xác thực Google Sheets từ phiên đăng nhập.');
+    if (!token) {
+      throw new Error('Không nhận được mã xác thực Google Sheets từ phiên đăng nhập.');
+    }
+
+    cachedAccessToken = token;
+    return token;
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (code === 'auth/popup-closed-by-user') {
+      throw new Error('Cửa sổ đăng nhập Google đã bị tắt trước khi cấp quyền. Vui lòng bấm thử lại để tiếp tục.');
+    }
+    if (code === 'auth/popup-blocked') {
+      throw new Error('Trình duyệt đang chặn cửa sổ pop-up. Bạn hãy nhấp vào biểu tượng chặn pop-up trên thanh địa chỉ, chọn "Luôn cho phép" và thử lại nhé.');
+    }
+    if (code === 'auth/cancelled-popup-request') {
+      throw new Error('Yêu cầu xác thực pop-up đã bị hủy do có yêu cầu mới.');
+    }
+    throw err;
   }
-
-  cachedAccessToken = token;
-  return token;
 }
 
 /**

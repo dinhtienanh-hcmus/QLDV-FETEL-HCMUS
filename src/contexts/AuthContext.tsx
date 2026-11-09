@@ -39,7 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com'];
+        const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com', 'dinhtienanh235@gmail.com'];
         const userEmailLower = firebaseUser.email?.toLowerCase() || '';
         const isDefaultAdmin = adminEmails.includes(userEmailLower);
 
@@ -254,7 +254,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!auth.currentUser) return;
     const userDocRef = doc(db, 'users', auth.currentUser.uid);
     const userEmailLower = auth.currentUser.email?.toLowerCase() || '';
-    const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com'];
+    const adminEmails = ['dkdtvt.hcmus@gmail.com', 'dinhtienanh.hcmus@gmail.com', 'dinhtienanh235@gmail.com'];
     const isDefaultAdmin = adminEmails.includes(userEmailLower);
 
     let newEmail = auth.currentUser.email || '';

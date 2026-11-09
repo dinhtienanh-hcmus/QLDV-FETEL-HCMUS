@@ -5,7 +5,9 @@ import firebaseConfigData from '../../firebase-applet-config.json';
 
 export const firebaseConfig = firebaseConfigData;
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
+export const FIRESTORE_DATABASE_ID =
+  (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-db3168c1-729b-4a68-8d30-1644a5330071';
+export const db = getFirestore(app, FIRESTORE_DATABASE_ID);
 export const auth = getAuth(app);
 
 export function isQuotaExceededError(err: any): boolean {

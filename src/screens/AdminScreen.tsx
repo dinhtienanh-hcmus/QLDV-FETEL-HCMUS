@@ -9,7 +9,7 @@ import Papa from 'papaparse';
 import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY } from '../utils/termUtils';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { getGoogleSheetsAccessToken, hasCachedToken, createTrackingSpreadsheet, syncTrackingSpreadsheet, extractSpreadsheetId } from '../lib/googleSheets';
-import { getGmailAccessToken, getCachedGmailToken, getCachedGmailEmail, hasCachedGmailToken, fetchRecentEmails, fetchAttachmentContent, sendBulkNotificationEmail, GmailMessageSummary, EmailAttachment } from '../lib/gmail';
+import { getGmailAccessToken, getCachedGmailToken, getCachedGmailEmail, hasCachedGmailToken, setCachedGmailToken, fetchRecentEmails, fetchAttachmentContent, sendBulkNotificationEmail, GmailMessageSummary, EmailAttachment } from '../lib/gmail';
 
 const VIETNAMESE_REPAIR_MAP: Record<string, string> = {
   'Ph?m': 'Phạm', 'Nguy?n': 'Nguyễn', 'B?o': 'Bảo', 'H?i': 'Hải', 'Ðang': 'Đăng', 'Qu?c': 'Quốc',
@@ -112,12 +112,12 @@ export default function AdminScreen() {
     }
     if (isBranch) {
       const myBranch = (currentUser?.branch || '').trim().toLowerCase();
-      if (!myBranch) return false;
+      if (!myBranch) return true;
       const uBranch = (u.branch || '').trim().toLowerCase();
       const isSameBranch = uBranch === myBranch || uBranch.includes(myBranch) || myBranch.includes(uBranch);
-      return isSameBranch && u.role === 'doanvien';
+      return isSameBranch && (u.role === 'doanvien' || !u.role || u.role === 'chidoan');
     }
-    return false;
+    return true;
   };
 
   const [activeTab, setActiveTab] = useState<'activities' | 'users' | 'bch' | 'handbook' | 'branches' | 'tracking' | 'notifications'>('activities');
@@ -268,24 +268,26 @@ export default function AdminScreen() {
       const cachedUsers = localStorage.getItem('cached_admin_users');
       if (cachedUsers) {
         const parsed = JSON.parse(cachedUsers);
-        const normalized = parsed.map((u: any) => {
-          const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
-          const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
-          if (nameIsNumeric && mssvHasText) {
-            return {
-              ...u,
-              name: u.mssv,
-              mssv: u.name,
-              username: u.name,
-              email: (u.email && u.email.includes('@student.hcmus.edu.vn')) ? '' : u.email
-            };
-          }
-          if (u.email && u.email.includes('@student.hcmus.edu.vn')) {
-            return { ...u, email: '' };
-          }
-          return u;
-        });
-        setUsersList(normalized);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const normalized = parsed.map((u: any) => {
+            const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+            const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+            if (nameIsNumeric && mssvHasText) {
+              return {
+                ...u,
+                name: u.mssv,
+                mssv: u.name,
+                username: u.name,
+                email: (u.email && u.email.includes('@student.hcmus.edu.vn')) ? '' : u.email
+              };
+            }
+            if (u.email && u.email.includes('@student.hcmus.edu.vn')) {
+              return { ...u, email: '' };
+            }
+            return u;
+          });
+          setUsersList(normalized);
+        }
       }
       const cachedActs = localStorage.getItem('cached_admin_activities');
       if (cachedActs) setActivities(JSON.parse(cachedActs));
@@ -571,14 +573,38 @@ export default function AdminScreen() {
     setIsFetchingEmails(true);
     setSendResultMsg(null);
     try {
-      let tokenInfo = hasCachedGmailToken()
-        ? await getGmailAccessToken(false, 'dkdtvt.hcmus@gmail.com')
-        : await getGmailAccessToken(true, 'dkdtvt.hcmus@gmail.com');
+      let tokenInfo: { token: string; email: string };
+      try {
+        tokenInfo = hasCachedGmailToken()
+          ? await getGmailAccessToken(false, 'dkdtvt.hcmus@gmail.com')
+          : await getGmailAccessToken(true, 'dkdtvt.hcmus@gmail.com');
+      } catch (authErr: any) {
+        setIsFetchingEmails(false);
+        setSendResultMsg({ type: 'error', text: authErr?.message || 'Không thể xác thực quyền truy cập Gmail.' });
+        return;
+      }
+
       setGmailConnectedEmail(tokenInfo.email);
-      const emails = await fetchRecentEmails(tokenInfo.token, emailSearchQuery);
+      let emails: GmailMessageSummary[] = [];
+      try {
+        emails = await fetchRecentEmails(tokenInfo.token, emailSearchQuery);
+      } catch (fetchErr: any) {
+        // If token expired, clear cache and try interactive login once
+        setCachedGmailToken(null, null);
+        if (String(fetchErr?.message || '').includes('401') || String(fetchErr?.message || '').includes('403')) {
+          tokenInfo = await getGmailAccessToken(true, 'dkdtvt.hcmus@gmail.com');
+          setGmailConnectedEmail(tokenInfo.email);
+          emails = await fetchRecentEmails(tokenInfo.token, emailSearchQuery);
+        } else {
+          throw fetchErr;
+        }
+      }
+
       setRecentEmails(emails);
       if (emails.length === 0) {
-        setSendResultMsg({ type: 'error', text: 'Không tìm thấy email nào phù hợp với từ khóa tìm kiếm.' });
+        setSendResultMsg({ type: 'error', text: 'Không tìm thấy email nào phù hợp với từ khóa tìm kiếm trong hộp thư đến.' });
+      } else {
+        setSendResultMsg({ type: 'success', text: `Đã tải thành công ${emails.length} email gần đây từ hộp thư ${tokenInfo.email}.` });
       }
     } catch (e: any) {
       console.warn('Lỗi tải email:', e);
@@ -1158,18 +1184,12 @@ export default function AdminScreen() {
 
         // Nếu là bản ghi tạm profile_ nhưng đoàn viên này đã đăng nhập tài khoản thật:
         if (isPlaceholder && ((mssvKey && activeUserMssvs.has(mssvKey)) || (emailKey && activeUserEmails.has(emailKey)))) {
-          if (isAdmin) {
-            deleteDoc(doc(db, 'users', usr.id)).catch(console.error);
-          }
           continue; // Bỏ qua, không đếm trùng vào danh sách và thống kê
         }
 
         // Kiểm tra tránh trùng lặp giữa các bản ghi placeholder với nhau
         if (mssvKey) {
           if (seenIdentity.has(mssvKey)) {
-            if (isAdmin && isPlaceholder) {
-              deleteDoc(doc(db, 'users', usr.id)).catch(console.error);
-            }
             continue;
           }
           seenIdentity.add(mssvKey);
@@ -1179,15 +1199,14 @@ export default function AdminScreen() {
       }
 
       const cleanedUsers = deduplicatedRaw.map(usr => {
-        let modified = false;
         let cTerm = usr.committeeTerm;
         let cPeriod = usr.committeePeriod;
         let bTerm = usr.branchTerm;
 
-        let uName = (usr.name || '').trim();
-        let uMssv = (usr.mssv || '').trim();
-        let uUsername = (usr.username || '').trim();
-        let uEmail = (usr.email || '').trim();
+        let uName = String(usr.name || '').trim();
+        let uMssv = String(usr.mssv || '').trim();
+        let uUsername = String(usr.username || '').trim();
+        let uEmail = String(usr.email || '').trim();
 
         // 1. Tự động chuẩn hóa nếu Họ tên và MSSV bị lưu ngược (Tên toàn số, MSSV có chữ cái)
         const nameIsNumeric = /^\d{6,10}$/.test(uName);
@@ -1198,51 +1217,21 @@ export default function AdminScreen() {
           uName = actualName;
           uMssv = actualMssv;
           uUsername = actualMssv;
-          modified = true;
         }
 
         // 2. Xóa bỏ email sinh viên ảo (@student.hcmus.edu.vn)
         if (uEmail.toLowerCase().includes('@student.hcmus.edu.vn')) {
           uEmail = '';
-          modified = true;
         }
 
         if (cTerm && isTermExpired(cTerm)) {
           cTerm = null;
-          modified = true;
         }
         if (cPeriod && isTermExpired(cPeriod)) {
           cPeriod = null;
-          modified = true;
         }
         if (bTerm && isTermExpired(bTerm)) {
           bTerm = null;
-          modified = true;
-        }
-
-        if (modified && (isAdmin || isBranch)) {
-          const updatePayload: Record<string, any> = {
-            name: uName,
-            mssv: uMssv,
-            username: uUsername,
-            email: uEmail,
-            committeeTerm: cTerm,
-            committeePeriod: cPeriod,
-            branchTerm: bTerm
-          };
-          if (usr.id.startsWith('profile_') && uMssv && !usr.id.toLowerCase().includes(uMssv.toLowerCase())) {
-            const cleanDocId = `profile_${uMssv.toLowerCase()}`;
-            setDoc(doc(db, 'users', cleanDocId), {
-              ...usr,
-              ...updatePayload,
-              isMerged: false,
-              updatedAt: Date.now()
-            }, { merge: true }).then(() => {
-              deleteDoc(doc(db, 'users', usr.id)).catch(() => {});
-            }).catch(console.error);
-          } else {
-            updateDoc(doc(db, 'users', usr.id), updatePayload).catch(console.error);
-          }
         }
 
         return {
@@ -1257,11 +1246,13 @@ export default function AdminScreen() {
         };
       });
 
-      setUsersList(cleanedUsers);
+      if (cleanedUsers.length > 0) {
+        setUsersList(cleanedUsers);
+        try {
+          localStorage.setItem('cached_admin_users', JSON.stringify(cleanedUsers));
+        } catch {}
+      }
       setQuotaExceeded(false);
-      try {
-        localStorage.setItem('cached_admin_users', JSON.stringify(cleanedUsers));
-      } catch {}
 
       // Sync lightweight BCH summary doc so HomeScreen only needs 1 document read
       try {
@@ -2943,14 +2934,34 @@ export default function AdminScreen() {
 
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                <h3 className="text-sm font-bold text-slate-800 flex items-center">
-                  <List size={16} className="mr-1.5 text-blue-600"/> 
-                  {isBranch ? `Danh sách Đoàn viên Chi đoàn ${currentUser?.branch || ''}` : 'Danh sách tài khoản hệ thống'} ({usersList.filter(isUserInMyBranch).length})
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center">
+                    <List size={16} className="mr-1.5 text-blue-600"/> 
+                    {isBranch ? `Danh sách Đoàn viên Chi đoàn ${currentUser?.branch || ''}` : 'Danh sách tài khoản hệ thống'} ({usersList.filter(isUserInMyBranch).length})
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={fetchUsers}
+                    disabled={loadingUsers}
+                    className="p-1 text-slate-500 hover:text-blue-600 rounded hover:bg-slate-100 transition cursor-pointer"
+                    title="Tải lại danh sách từ cơ sở dữ liệu"
+                  >
+                    <RefreshCw size={13} className={loadingUsers ? 'animate-spin' : ''} />
+                  </button>
+                </div>
                 {isAdmin && selectedBranchFilter && (
-                  <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full w-fit">
-                    Lớp {selectedBranchFilter}: {usersList.filter(u => (u.branch || '').toLowerCase() === selectedBranchFilter.toLowerCase()).length} tài khoản
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full w-fit">
+                      Lớp {selectedBranchFilter}: {usersList.filter(u => (u.branch || '').toLowerCase() === selectedBranchFilter.toLowerCase()).length} tài khoản
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBranchFilter('')}
+                      className="text-[10px] text-red-600 hover:underline font-bold cursor-pointer bg-red-50 px-2 py-0.5 rounded border border-red-200"
+                    >
+                      Xóa lọc
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -3074,20 +3085,33 @@ export default function AdminScreen() {
                    })}
                    {usersList.filter((u: any) => {
                       if (!isUserInMyBranch(u)) return false;
-                      if (isAdmin && selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
+                      if (isAdmin && selectedBranchFilter && String(u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
                         return false;
                       }
                       const q = userSearch.toLowerCase().trim();
                       if (!q) return true;
+                      const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+                      const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+                      const isFlipped = nameIsNumeric && mssvHasText;
+                      const displayName = isFlipped ? String(u.mssv || '') : String(u.name || '');
+                      const displayMssv = isFlipped ? String(u.name || '') : String(u.mssv || u.username || '');
                       return (
-                        (u.name || '').toLowerCase().includes(q) ||
-                        (u.email || '').toLowerCase().includes(q) ||
-                        (u.username || '').toLowerCase().includes(q) ||
-                        (u.mssv || '').toLowerCase().includes(q) ||
-                        (u.branch || '').toLowerCase().includes(q)
+                        displayName.toLowerCase().includes(q) ||
+                        displayMssv.toLowerCase().includes(q) ||
+                        String(u.email || '').toLowerCase().includes(q) ||
+                        String(u.branch || '').toLowerCase().includes(q)
                       );
                     }).length === 0 && (
-                      <p className="text-xs text-center text-slate-400 py-6 italic">Không tìm thấy đoàn viên phù hợp.</p>
+                      <div className="text-center py-6">
+                        <p className="text-xs text-slate-400 italic mb-2">Không tìm thấy đoàn viên phù hợp.</p>
+                        <button
+                          type="button"
+                          onClick={fetchUsers}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-bold underline cursor-pointer"
+                        >
+                          Bấm vào đây để tải lại danh sách từ máy chủ
+                        </button>
+                      </div>
                    )}
                 </div>
               )}

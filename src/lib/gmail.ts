@@ -5,7 +5,6 @@ let cachedGmailAccessToken: string | null = null;
 let cachedGmailUserEmail: string | null = null;
 
 export const GMAIL_SCOPES = [
-  'https://mail.google.com/',
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
@@ -49,18 +48,35 @@ export async function getGmailAccessToken(forceInteractive = false, loginHint = 
     });
   }
 
-  const result = await signInWithPopup(auth, provider);
-  const credential = GoogleAuthProvider.credentialFromResult(result);
-  const token = credential?.accessToken;
-  const email = result.user?.email || loginHint;
+  try {
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken;
+    const email = result.user?.email || loginHint;
 
-  if (!token) {
-    throw new Error('Không thể nhận quyền truy cập Gmail từ tài khoản Google.');
+    if (!token) {
+      throw new Error('Không thể nhận quyền truy cập Gmail từ tài khoản Google.');
+    }
+
+    cachedGmailAccessToken = token;
+    cachedGmailUserEmail = email;
+    return { token, email };
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (code === 'auth/popup-closed-by-user') {
+      throw new Error('Cửa sổ đăng nhập Google đã bị tắt trước khi cấp quyền. Vui lòng bấm thử lại để tiếp tục.');
+    }
+    if (code === 'auth/popup-blocked') {
+      throw new Error('Trình duyệt đang chặn cửa sổ pop-up. Bạn hãy nhấp vào biểu tượng chặn pop-up trên thanh địa chỉ, chọn "Luôn cho phép" và thử lại nhé.');
+    }
+    if (code === 'auth/cancelled-popup-request') {
+      throw new Error('Yêu cầu xác thực pop-up đã bị hủy do có yêu cầu mới.');
+    }
+    if (code === 'auth/unauthorized-domain') {
+      throw new Error('Tên miền ứng dụng chưa được ủy quyền trong Firebase Auth.');
+    }
+    throw err;
   }
-
-  cachedGmailAccessToken = token;
-  cachedGmailUserEmail = email;
-  return { token, email };
 }
 
 export interface EmailAttachment {
@@ -217,19 +233,36 @@ export async function fetchAttachmentContent(
 }
 
 /**
- * Helper to encode UTF-8 string to base64url
+ * Helper to encode UTF-8 string to Base64 safely in chunks
  */
 function utf8ToBase64(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const len = bytes.byteLength;
+  const chunkSize = 16384;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode(...Array.from(chunk));
   }
   return btoa(binary);
 }
 
-function base64ToBase64Url(base64: string): string {
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+/**
+ * Convert string or RFC 822 email content to base64url for Gmail API
+ */
+function stringToBase64Url(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  const len = bytes.byteLength;
+  const chunkSize = 16384;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode(...Array.from(chunk));
+  }
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 /**
@@ -248,8 +281,12 @@ export async function sendBulkNotificationEmail(
 ): Promise<{ successCount: number; failedRecipients: string[]; errors: string[] }> {
   const { fromEmail, fromName = 'BCH Đoàn khoa Điện tử - Viễn thông', recipients, subject, bodyText, attachments = [] } = options;
 
-  if (recipients.length === 0) {
-    throw new Error('Danh sách người nhận trống.');
+  const validRecipients = recipients
+    .map(r => r.trim())
+    .filter(r => r.length > 0 && r.includes('@'));
+
+  if (validRecipients.length === 0) {
+    throw new Error('Không có địa chỉ email người nhận hợp lệ.');
   }
 
   let successCount = 0;
@@ -258,10 +295,10 @@ export async function sendBulkNotificationEmail(
 
   const boundary = `====_FETEL_NOTIFICATION_${Date.now()}_====`;
   const subjectEncoded = `=?UTF-8?B?${utf8ToBase64(subject)}?=`;
-  const fromHeader = `${fromName} <${fromEmail}>`;
+  const fromHeader = `=?UTF-8?B?${utf8ToBase64(fromName)}?= <${fromEmail}>`;
 
-  // Process sending in batches
-  for (const recipient of recipients) {
+  // Process sending per recipient so each Chi đoàn receives an individual professional email
+  for (const recipient of validRecipients) {
     try {
       const emailLines: string[] = [];
       emailLines.push(`From: ${fromHeader}`);
@@ -299,7 +336,7 @@ export async function sendBulkNotificationEmail(
       }
 
       const rawEmail = emailLines.join('\r\n');
-      const base64UrlRaw = base64ToBase64Url(btoa(unescape(encodeURIComponent(rawEmail))));
+      const base64UrlRaw = stringToBase64Url(rawEmail);
 
       const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
         method: 'POST',
