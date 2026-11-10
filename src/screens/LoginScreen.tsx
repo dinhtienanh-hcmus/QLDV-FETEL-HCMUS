@@ -37,11 +37,10 @@ export default function LoginScreen() {
       try {
         const q = query(collection(db, 'branches'), orderBy('name', 'asc'));
         const snap = await getDocs(q);
-        if (!snap.empty) {
           const fetchedNames = snap.docs.map(d => d.data().name as string);
-          const combined = Array.from(new Set([...fetchedNames, ...DEFAULT_BRANCHES]));
+          const combined = Array.from(new Set([...fetchedNames, ...DEFAULT_BRANCHES]))
+            .filter(b => b && b !== '25ICD1' && b !== '26ICD1');
           setBranchOptions(combined);
-        }
       } catch (err) {
         console.error('Error loading branches:', err);
       }

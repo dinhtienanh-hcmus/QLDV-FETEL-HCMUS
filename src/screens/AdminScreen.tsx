@@ -912,6 +912,28 @@ export default function AdminScreen() {
     }
   };
 
+  const handleCleanKhoa2024 = async () => {
+    if (!window.confirm("Bạn có chắc chắn muốn xóa toàn bộ các Chi đoàn thuộc khóa 2024 (24DTV, 24ICD,...) khỏi hệ thống?")) {
+      return;
+    }
+    try {
+      const snap = await getDocs(collection(db, 'branches'));
+      let count = 0;
+      for (const d of snap.docs) {
+        const name = (d.data().name || '').trim();
+        if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(name)) {
+          await deleteDoc(doc(db, 'branches', d.id));
+          count++;
+        }
+      }
+      await fetchBranches();
+      alert(`Đã hoàn tất dọn dẹp và xóa ${count} Chi đoàn khóa 2024!`);
+    } catch (e: any) {
+      console.error(e);
+      alert("Lỗi khi xóa Chi đoàn khóa 2024: " + (e?.message || "Lỗi mạng"));
+    }
+  };
+
   const fetchBranches = async () => {
     try {
       const q = query(collection(db, 'branches'), orderBy('name', 'asc'));
@@ -929,16 +951,27 @@ export default function AdminScreen() {
         
         let migrated = false;
         const updatedList = [];
+        const seenNames = new Set<string>();
+
         for (const b of rawList) {
-          if (b.name === '25ICD1') {
-            await updateDoc(doc(db, 'branches', b.id), { name: '25ICD', updatedAt: Date.now() });
-            b.name = '25ICD';
+          const cleanName = (b.name || '').trim();
+          
+          // Completely delete any branch belonging to Khóa 2024 (e.g. 24..., 2024..., Chi đoàn 24...)
+          const isKhoa2024 = /^(chi\s*đoàn\s*)?(24|2024)/i.test(cleanName);
+          const isObsoleteIcd1 = cleanName === '25ICD1' || cleanName === '26ICD1' || cleanName.toLowerCase() === 'chi đoàn 25icd1' || cleanName.toLowerCase() === 'chi đoàn 26icd1';
+
+          if (isKhoa2024 || isObsoleteIcd1) {
+            await deleteDoc(doc(db, 'branches', b.id));
             migrated = true;
-          } else if (b.name === '26ICD1') {
-            await updateDoc(doc(db, 'branches', b.id), { name: '26ICD', updatedAt: Date.now() });
-            b.name = '26ICD';
-            migrated = true;
+            continue;
           }
+
+          // Remove duplicate branch entries if any
+          if (seenNames.has(cleanName)) {
+            await deleteDoc(doc(db, 'branches', b.id));
+            continue;
+          }
+          seenNames.add(cleanName);
           updatedList.push(b);
         }
 
@@ -961,8 +994,18 @@ export default function AdminScreen() {
           const usersSnap = await getDocs(usersRef);
           for (const userDoc of usersSnap.docs) {
             const userData = userDoc.data();
-            const idx = oldNames.indexOf(userData.branch || '');
-            if (idx !== -1) {
+            const currentB = (userData.branch || '').trim();
+            const isUserKhoa2024 = /^(chi\s*đoàn\s*)?(24|2024)/i.test(currentB);
+            const idx = oldNames.indexOf(currentB);
+
+            if (isUserKhoa2024) {
+              await updateDoc(doc(db, 'users', userDoc.id), {
+                branch: '',
+                branchRole: null,
+                branchTerm: null,
+                updatedAt: Date.now()
+              });
+            } else if (idx !== -1) {
               await updateDoc(doc(db, 'users', userDoc.id), {
                 branch: newNames[idx],
                 updatedAt: Date.now()
@@ -977,23 +1020,38 @@ export default function AdminScreen() {
             let needsUpdate = false;
             const updateFields: any = {};
             
-            const branchIdx = oldNames.indexOf(actData.branch || '');
-            if (branchIdx !== -1) {
-              updateFields.branch = newNames[branchIdx];
+            const currentActBranch = (actData.branch || '').trim();
+            const currentActTarget = (actData.targetAudience || '').trim();
+
+            if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(currentActBranch)) {
+              updateFields.branch = '';
               needsUpdate = true;
+            } else {
+              const branchIdx = oldNames.indexOf(currentActBranch);
+              if (branchIdx !== -1) {
+                updateFields.branch = newNames[branchIdx];
+                needsUpdate = true;
+              }
             }
             
-            const targetIdx = oldNames.indexOf(actData.targetAudience || '');
-            if (targetIdx !== -1) {
-              updateFields.targetAudience = newNames[targetIdx];
+            if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(currentActTarget)) {
+              updateFields.targetAudience = 'all';
               needsUpdate = true;
+            } else {
+              const targetIdx = oldNames.indexOf(currentActTarget);
+              if (targetIdx !== -1) {
+                updateFields.targetAudience = newNames[targetIdx];
+                needsUpdate = true;
+              }
             }
             
             if (actData.cooperatingBranches && Array.isArray(actData.cooperatingBranches)) {
-              const updatedCooperating = actData.cooperatingBranches.map((cb: string) => {
-                const idx = oldNames.indexOf(cb);
-                return idx !== -1 ? newNames[idx] : cb;
-              });
+              const updatedCooperating = actData.cooperatingBranches
+                .filter((cb: string) => !/^(chi\s*đoàn\s*)?(24|2024)/i.test(cb))
+                .map((cb: string) => {
+                  const idx = oldNames.indexOf(cb);
+                  return idx !== -1 ? newNames[idx] : cb;
+                });
               if (JSON.stringify(updatedCooperating) !== JSON.stringify(actData.cooperatingBranches)) {
                 updateFields.cooperatingBranches = updatedCooperating;
                 needsUpdate = true;
@@ -1001,10 +1059,12 @@ export default function AdminScreen() {
             }
             
             if (actData.branches && Array.isArray(actData.branches)) {
-              const updatedBranches = actData.branches.map((b: string) => {
-                const idx = oldNames.indexOf(b);
-                return idx !== -1 ? newNames[idx] : b;
-              });
+              const updatedBranches = actData.branches
+                .filter((b: string) => !/^(chi\s*đoàn\s*)?(24|2024)/i.test(b))
+                .map((b: string) => {
+                  const idx = oldNames.indexOf(b);
+                  return idx !== -1 ? newNames[idx] : b;
+                });
               if (JSON.stringify(updatedBranches) !== JSON.stringify(actData.branches)) {
                 updateFields.branches = updatedBranches;
                 needsUpdate = true;
@@ -1016,6 +1076,48 @@ export default function AdminScreen() {
               await updateDoc(doc(db, 'activities', activityDoc.id), updateFields);
             }
           }
+
+          // Clean up system/bch_cache as well
+          try {
+            const bchCacheSnap = await getDoc(doc(db, 'system', 'bch_cache'));
+            if (bchCacheSnap.exists() && Array.isArray(bchCacheSnap.data().members)) {
+              let cacheChanged = false;
+              const cleanedBch = bchCacheSnap.data().members
+                .filter((m: any) => {
+                  const b = (m.branch || '').trim();
+                  if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(b)) {
+                    if (!m.committeeRole || m.committeeRole.trim() === '') {
+                      cacheChanged = true;
+                      return false;
+                    }
+                  }
+                  return true;
+                })
+                .map((m: any) => {
+                  const b = (m.branch || '').trim();
+                  if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(b)) {
+                    cacheChanged = true;
+                    return { ...m, branch: 'Đoàn khoa ĐTVT', branchRole: null };
+                  }
+                  if (b === '25ICD1') {
+                    cacheChanged = true;
+                    return { ...m, branch: '25ICD' };
+                  }
+                  if (b === '26ICD1') {
+                    cacheChanged = true;
+                    return { ...m, branch: '26ICD' };
+                  }
+                  return m;
+                });
+              if (cacheChanged) {
+                await setDoc(doc(db, 'system', 'bch_cache'), { members: cleanedBch, updatedAt: Date.now() }, { merge: true });
+                try {
+                  localStorage.setItem('cached_bch_members', JSON.stringify(cleanedBch));
+                  window.dispatchEvent(new CustomEvent('bch_updated', { detail: cleanedBch }));
+                } catch {}
+              }
+            }
+          } catch {}
           
           fetchUsers();
           fetchActivities();
@@ -2921,10 +3023,20 @@ export default function AdminScreen() {
             </div>
 
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-              <div className="flex justify-between items-center mb-3">
+              <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center">
                   <Users size={16} className="mr-1.5 text-blue-600"/> Danh sách Chi đoàn trực thuộc ({branches.length})
                 </h3>
+                {isAdmin && (
+                  <button 
+                    type="button" 
+                    onClick={handleCleanKhoa2024} 
+                    className="text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 transition font-bold flex items-center gap-1 cursor-pointer"
+                    title="Xóa toàn bộ các Chi đoàn thuộc khóa 2024 (24DTV, 24ICD...)"
+                  >
+                    <Trash2 size={12} /> Dọn dẹp Chi đoàn khóa 2024
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">

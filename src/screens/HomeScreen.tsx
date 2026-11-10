@@ -118,7 +118,10 @@ export default function HomeScreen() {
   });
 
   const availableBranches = Array.from(new Set(
-    bchMembers.map(m => (m.branch || '').trim()).filter(b => b && b.toLowerCase() !== 'đoàn khoa đtvt')
+    bchMembers
+      .map(m => (m.branch || '').trim())
+      .map(b => b === '25ICD1' ? '25ICD' : (b === '26ICD1' ? '26ICD' : b))
+      .filter(b => b && b.toLowerCase() !== 'đoàn khoa đtvt' && b.toLowerCase() !== '25icd1' && b.toLowerCase() !== '26icd1' && !/^(chi\s*đoàn\s*)?(24|2024)/i.test(b))
   )).sort();
 
   const activeBranchTarget = isDoanKhoaAccount
