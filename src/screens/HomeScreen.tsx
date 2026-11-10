@@ -8,6 +8,7 @@ import { db, auth, isQuotaExceededError } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, orderBy, getDoc, deleteDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
 import { isTermExpired, formatDateToDDMMYYYY } from '../utils/termUtils';
+import { compressImage } from '../utils/imageCompressor';
 
 interface Organizer {
   mssv: string;
@@ -1185,14 +1186,19 @@ export default function HomeScreen() {
                     type="file" 
                     accept="image/*" 
                     className="hidden" 
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          setPreviewAvatar(ev.target?.result as string);
-                        };
-                        reader.readAsDataURL(file);
+                        try {
+                          const compressed = await compressImage(file, 256, 256, 0.82);
+                          setPreviewAvatar(compressed);
+                        } catch {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            setPreviewAvatar(ev.target?.result as string);
+                          };
+                          reader.readAsDataURL(file);
+                        }
                       }
                     }} 
                   />
@@ -1209,14 +1215,19 @@ export default function HomeScreen() {
                   type="file" 
                   accept="image/*" 
                   className="hidden" 
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        setPreviewAvatar(ev.target?.result as string);
-                      };
-                      reader.readAsDataURL(file);
+                      try {
+                        const compressed = await compressImage(file, 256, 256, 0.82);
+                        setPreviewAvatar(compressed);
+                      } catch {
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          setPreviewAvatar(ev.target?.result as string);
+                        };
+                        reader.readAsDataURL(file);
+                      }
                     }
                   }} 
                 />

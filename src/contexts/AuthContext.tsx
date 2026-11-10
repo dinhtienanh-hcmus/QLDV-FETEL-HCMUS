@@ -51,9 +51,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const getBranchFromEmail = (email: string) => {
           if (!email) return 'Chi đoàn';
           const prefix = email.split('@')[0].toLowerCase();
-          const clean = prefix.replace('.fetel', '').replace('chidoan', '').replace(/^[._-]+|[._-]+$/g, '');
+          let clean = prefix
+            .replace('.fetel', '')
+            .replace('banchaphanh', '')
+            .replace('bch', '')
+            .replace('chidoan', '')
+            .replace(/^[._-]+|[._-]+$/g, '')
+            .trim();
           if (!clean) return 'Chi đoàn';
-          return clean.toUpperCase();
+          clean = clean.toUpperCase();
+          if (clean === '25DTVDKD') return '25DTV_DKD';
+          if (clean === '26DTVDKD') return '26DTV_DKD';
+          return clean;
         };
 
         const extractedBranch = isBranchAccount ? getBranchFromEmail(userEmailLower) : '';
@@ -315,6 +324,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       avatar: avatarUrl,
       updatedAt: Date.now(),
     }, { merge: true });
+
+    try {
+      const cacheKey = `cached_user_profile_${auth.currentUser.uid}`;
+      const raw = localStorage.getItem(cacheKey);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        obj.avatar = avatarUrl;
+        localStorage.setItem(cacheKey, JSON.stringify(obj));
+      }
+    } catch {}
 
     setCurrentUser((prev) => {
       if (!prev) return null;

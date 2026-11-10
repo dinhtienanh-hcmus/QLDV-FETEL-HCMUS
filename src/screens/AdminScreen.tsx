@@ -11,6 +11,7 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { getGoogleSheetsAccessToken, hasCachedToken, createTrackingSpreadsheet, syncTrackingSpreadsheet, extractSpreadsheetId } from '../lib/googleSheets';
 import { getGmailAccessToken, getCachedGmailToken, getCachedGmailEmail, hasCachedGmailToken, setCachedGmailToken, fetchRecentEmails, fetchAttachmentContent, sendBulkNotificationEmail, GmailMessageSummary, EmailAttachment } from '../lib/gmail';
 import { matchStudentTo25ICD } from '../data/canonicalRoster';
+import { compressImage } from '../utils/imageCompressor';
 
 const VIETNAMESE_REPAIR_MAP: Record<string, string> = {
   'Ph?m': 'Phạm', 'Nguy?n': 'Nguyễn', 'B?o': 'Bảo', 'H?i': 'Hải', 'Ðang': 'Đăng', 'Qu?c': 'Quốc',
@@ -208,6 +209,7 @@ export default function AdminScreen() {
   const [myDriveLink, setMyDriveLink] = useState('');
   const [savingDriveLink, setSavingDriveLink] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [driveErrorMsg, setDriveErrorMsg] = useState('');
 
   const DEFAULT_BRANCHES = [
     '25ICD', '25DTV1', '25DTV2', '25DTV_DKD',
@@ -1259,9 +1261,27 @@ export default function AdminScreen() {
     }
   };
 
+  const findBranchMatch = (rawBranchName: string) => {
+    if (!rawBranchName) return null;
+    const clean = rawBranchName.trim();
+    // 1. Exact match
+    let found = branches.find(b => (b.name || '').toLowerCase().trim() === clean.toLowerCase());
+    if (found) return found;
+
+    // 2. Normalized match stripping "bch", "chi đoàn", spaces, underscores
+    const normalize = (s: string) => (s || '').toLowerCase().replace(/^(bch|chi\s*đoàn)\s*/i, '').replace(/[\s_-]+/g, '');
+    const cleanNorm = normalize(clean);
+    found = branches.find(b => normalize(b.name) === cleanNorm);
+    if (found) return found;
+
+    // 3. Substring match
+    found = branches.find(b => cleanNorm.includes(normalize(b.name)) || normalize(b.name).includes(cleanNorm));
+    return found || null;
+  };
+
   useEffect(() => {
-    if (isBranch && branches.length > 0) {
-      const mb = branches.find(b => b.name === currentUser?.branch);
+    if (isBranch && branches.length > 0 && currentUser?.branch) {
+      const mb = findBranchMatch(currentUser.branch);
       if (mb) {
         setMyDriveLink(mb.activityDriveLink || '');
       }
@@ -1272,30 +1292,32 @@ export default function AdminScreen() {
     if (!currentUser?.branch) return;
     setSavingDriveLink(true);
     setSaveSuccess(false);
+    setDriveErrorMsg('');
     try {
-      const mb = branches.find(b => b.name === currentUser.branch);
+      const mb = findBranchMatch(currentUser.branch);
       if (mb) {
         await updateDoc(doc(db, 'branches', mb.id), {
           activityDriveLink: myDriveLink.trim(),
           updatedAt: Date.now()
         });
         setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 3000);
-        fetchBranches();
+        setTimeout(() => setSaveSuccess(false), 4000);
+        await fetchBranches();
       } else {
-        // Create branch doc if missing
+        const normalizedName = currentUser.branch.replace(/^(bch|chi\s*đoàn)\s*/i, '').trim() || currentUser.branch;
         await addDoc(collection(db, 'branches'), {
-          name: currentUser.branch,
+          name: normalizedName,
           activityDriveLink: myDriveLink.trim(),
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          updatedAt: Date.now()
         });
         setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 3000);
-        fetchBranches();
+        setTimeout(() => setSaveSuccess(false), 4000);
+        await fetchBranches();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert('Không thể cập nhật link Drive. Vui lòng thử lại.');
+      setDriveErrorMsg('Không thể cập nhật link Drive: ' + (e?.message || 'Lỗi mạng hoặc phân quyền. Vui lòng thử lại.'));
     } finally {
       setSavingDriveLink(false);
     }
@@ -2442,52 +2464,55 @@ export default function AdminScreen() {
     e.preventDefault();
     if (!editingBchUser) return;
     
-    let updates: any = {};
-    const commRole = bchForm.committeeRole.trim();
-    const brRole = bchForm.branchRole.trim();
+    const commRole = (bchForm.committeeRole || '').trim();
+    const brRole = (bchForm.branchRole || '').trim();
+    const commPeriod = (bchForm.committeePeriod || '').trim();
+    const commTerm = (bchForm.committeeTerm || '').trim();
+    const brTerm = (bchForm.branchTerm || '').trim();
+    const rawAvatar = (bchForm.avatar || '').trim();
 
-    updates.committeeRole = commRole || null;
-    updates.branchRole = brRole || null;
-    updates.updatedAt = Date.now();
+    let updates: Record<string, any> = {
+      committeeRole: commRole,
+      branchRole: brRole,
+      updatedAt: Date.now()
+    };
 
     if (!commRole && !brRole) {
-       updates.committeePeriod = null;
-       updates.committeeTerm = null;
-       updates.branchTerm = null;
+      updates.committeePeriod = '';
+      updates.committeeTerm = '';
+      updates.branchTerm = '';
+      updates.avatar = '';
     } else {
-       updates.committeePeriod = bchForm.committeePeriod.trim();
-       updates.committeeTerm = bchForm.committeeTerm.trim();
-       updates.branchTerm = bchForm.branchTerm.trim();
-       if (bchForm.avatar.trim() !== '') {
-          updates.avatar = bchForm.avatar.trim();
-       } else {
-          updates.avatar = null;
-       }
+      updates.committeePeriod = commPeriod;
+      updates.committeeTerm = commTerm;
+      updates.branchTerm = brTerm;
+      updates.avatar = rawAvatar;
     }
     
     try {
-      // 1. Identify all document IDs associated with this person (Auth UID, profile_<mssv>, etc.)
+      // 1. Identify all document IDs associated with this person ONLY from existing records in usersList
       const targetDocIds = new Set<string>();
       if (editingBchUser.id) targetDocIds.add(editingBchUser.id);
       
       const cleanMssv = (editingBchUser.mssv || editingBchUser.username || '').toLowerCase().trim();
-      if (cleanMssv) {
-        targetDocIds.add(`profile_${cleanMssv}`);
-      }
       const cleanEmail = (editingBchUser.email || '').toLowerCase().trim();
 
-      // Scan usersList for any matching accounts to ensure multi-record synchronization
       usersList.forEach(u => {
+        if (!u.id) return;
         const uMssv = (u.mssv || u.username || '').toLowerCase().trim();
         const uEmail = (u.email || '').toLowerCase().trim();
         if ((cleanMssv && uMssv === cleanMssv) || (cleanEmail && uEmail === cleanEmail)) {
-          if (u.id) targetDocIds.add(u.id);
+          targetDocIds.add(u.id);
         }
       });
 
-      // 2. Persist to all matching user docs via setDoc with merge (safe against missing documents)
+      // 2. Persist to existing user docs with individual try-catch so one doc warning doesn't block the update
       for (const docId of targetDocIds) {
-        await setDoc(doc(db, 'users', docId), updates, { merge: true });
+        try {
+          await setDoc(doc(db, 'users', docId), updates, { merge: true });
+        } catch (docErr) {
+          console.warn(`Lưu user ${docId} cảnh báo:`, docErr);
+        }
       }
 
       // 3. Immediately update in-memory usersList for instant UI response
@@ -2501,7 +2526,7 @@ export default function AdminScreen() {
       });
       setUsersList(updatedList);
 
-      // 4. Compute updated BCH members list (excluding 2024)
+      // 4. Compute updated BCH members list (excluding 2024 and expired)
       const freshBch = updatedList.filter(
         (u: any) => {
           const hasRole = (u.committeeRole && String(u.committeeRole).trim() !== '') || (u.branchRole && String(u.branchRole).trim() !== '');
@@ -2509,33 +2534,64 @@ export default function AdminScreen() {
           const b = String(u.branch || '').trim();
           const m = String(u.mssv || u.username || '').trim();
           const n = String(u.name || '').trim();
-          if (/^(chi\s*đoàn\s*)?24/i.test(b) || m.startsWith('24') || n.includes('24_') || u.id.startsWith('profile_24')) {
+          if (/^(chi\s*đoàn\s*)?24/i.test(b) || m.startsWith('24') || n.includes('24_') || String(u.id || '').startsWith('profile_24')) {
             return false;
           }
           return true;
         }
       ).map((m: any) => m.branch === '25ICD1' ? { ...m, branch: '25ICD' } : m);
 
-      // 5. CRITICAL: Await updating system/bch_cache so HomeScreen and other views get fresh data on 1st read
-      await setDoc(doc(db, 'system', 'bch_cache'), { members: freshBch, updatedAt: Date.now() }, { merge: true });
+      // 5. Sanitize every member for system/bch_cache to prevent undefined fields and stay safely under 1MB
+      const cleanBchCache = freshBch.map((m: any) => {
+        let avatarStr = m.avatar || '';
+        // If avatar string exceeds 80KB, trim it to preserve system/bch_cache document size
+        if (typeof avatarStr === 'string' && avatarStr.length > 80000) {
+          avatarStr = '';
+        }
+        return {
+          id: String(m.id || ''),
+          name: String(m.name || m.fullName || 'Đoàn viên'),
+          mssv: String(m.mssv || m.username || ''),
+          branch: String(m.branch || ''),
+          email: String(m.email || ''),
+          role: String(m.role || 'doanvien'),
+          committeeRole: String(m.committeeRole || ''),
+          branchRole: String(m.branchRole || ''),
+          committeePeriod: String(m.committeePeriod || ''),
+          committeeTerm: String(m.committeeTerm || ''),
+          branchTerm: String(m.branchTerm || ''),
+          avatar: avatarStr,
+          gender: String(m.gender || ''),
+          dateOfBirth: String(m.dateOfBirth || ''),
+          phone: String(m.phone || ''),
+          updatedAt: Number(m.updatedAt || Date.now())
+        };
+      });
+
+      try {
+        await setDoc(doc(db, 'system', 'bch_cache'), { members: cleanBchCache, updatedAt: Date.now() }, { merge: true });
+      } catch (cacheErr) {
+        console.warn("Lưu cache BCH không đồng bộ Firestore:", cacheErr);
+      }
 
       // 6. Synchronize localStorage
       try {
-        localStorage.setItem('cached_bch_members', JSON.stringify(freshBch));
+        localStorage.setItem('cached_bch_members', JSON.stringify(cleanBchCache));
         localStorage.setItem('cached_admin_users', JSON.stringify(updatedList));
       } catch {}
 
       // 7. Dispatch global event so HomeScreen (even if active in background) re-renders immediately
       try {
-        window.dispatchEvent(new CustomEvent('bch_updated', { detail: freshBch }));
+        window.dispatchEvent(new CustomEvent('bch_updated', { detail: cleanBchCache }));
       } catch {}
 
       setEditingBchUser(null);
       alert("Cập nhật chức vụ thành công và đã đồng bộ ngay lập tức lên Trang chủ!");
       fetchUsers();
-    } catch(e) {
+    } catch(e: any) {
       console.error("Lỗi cập nhật chức vụ:", e);
-      alert("Lỗi khi cập nhật chức vụ. Vui lòng kiểm tra kết nối mạng.");
+      const errMsg = e?.message || "Lỗi hệ thống khi cập nhật chức vụ";
+      alert(`Không thể cập nhật chức vụ: ${errMsg}`);
     }
   };
 
@@ -2633,7 +2689,7 @@ export default function AdminScreen() {
         {isBranch && (
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl shadow-sm border border-blue-200">
             <h3 className="text-sm font-bold text-blue-900 mb-1 flex items-center gap-1.5">
-              📁 Link Drive Tổng Hợp Hoạt Động (Chi đoàn {currentUser?.branch})
+              📁 Link Drive Tổng Hợp Hoạt Động (Chi đoàn {currentUser?.branch?.replace(/^(BCH|Chi\s*đoàn)\s*/i, '') || currentUser?.branch})
             </h3>
             <p className="text-[11px] text-slate-600 mb-3">
               Nhập đường dẫn Google Drive chứa báo cáo và minh chứng tổng hợp hoạt động của Chi đoàn bạn để Đoàn khoa theo dõi và duyệt trực tuyến.
@@ -2644,7 +2700,10 @@ export default function AdminScreen() {
                 placeholder="https://drive.google.com/drive/folders/..." 
                 className="flex-1 text-xs p-2.5 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium"
                 value={myDriveLink}
-                onChange={e => setMyDriveLink(e.target.value)}
+                onChange={e => {
+                  setMyDriveLink(e.target.value);
+                  setDriveErrorMsg('');
+                }}
               />
               <button 
                 onClick={handleSaveDriveLink}
@@ -2655,8 +2714,13 @@ export default function AdminScreen() {
               </button>
             </div>
             {saveSuccess && (
-              <p className="text-[10px] text-emerald-600 font-bold mt-1.5 flex items-center gap-1">
-                <Check size={12} /> Đã cập nhật link Drive thành công!
+              <p className="text-[11px] text-emerald-600 font-bold mt-2 flex items-center gap-1">
+                <Check size={13} /> Đã cập nhật link Drive thành công!
+              </p>
+            )}
+            {driveErrorMsg && (
+              <p className="text-[11px] text-red-600 font-bold mt-2 flex items-center gap-1">
+                <AlertCircle size={13} /> {driveErrorMsg}
               </p>
             )}
           </div>
@@ -4821,14 +4885,19 @@ export default function AdminScreen() {
                              type="file" 
                              accept="image/*" 
                              className="hidden" 
-                             onChange={(e) => {
+                             onChange={async (e) => {
                                const file = e.target.files?.[0];
                                if (file) {
-                                 const reader = new FileReader();
-                                 reader.onload = (ev) => {
-                                   setBchForm({ ...bchForm, avatar: ev.target?.result as string });
-                                 };
-                                 reader.readAsDataURL(file);
+                                 try {
+                                   const compressed = await compressImage(file, 256, 256, 0.82);
+                                   setBchForm(prev => ({ ...prev, avatar: compressed }));
+                                 } catch {
+                                   const reader = new FileReader();
+                                   reader.onload = (ev) => {
+                                     setBchForm(prev => ({ ...prev, avatar: ev.target?.result as string }));
+                                   };
+                                   reader.readAsDataURL(file);
+                                 }
                                }
                              }} 
                            />
@@ -4841,14 +4910,19 @@ export default function AdminScreen() {
                              type="file" 
                              accept="image/*" 
                              className="hidden" 
-                             onChange={(e) => {
+                             onChange={async (e) => {
                                const file = e.target.files?.[0];
                                if (file) {
-                                 const reader = new FileReader();
-                                 reader.onload = (ev) => {
-                                   setBchForm({ ...bchForm, avatar: ev.target?.result as string });
-                                 };
-                                 reader.readAsDataURL(file);
+                                 try {
+                                   const compressed = await compressImage(file, 256, 256, 0.82);
+                                   setBchForm(prev => ({ ...prev, avatar: compressed }));
+                                 } catch {
+                                   const reader = new FileReader();
+                                   reader.onload = (ev) => {
+                                     setBchForm(prev => ({ ...prev, avatar: ev.target?.result as string }));
+                                   };
+                                   reader.readAsDataURL(file);
+                                 }
                                }
                              }} 
                            />

@@ -120,7 +120,9 @@ service cloud.firestore {
     
     match /branches/{branchId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if isSignedIn() && (isAdmin() || isBranchManager());
+      allow update: if isSignedIn() && (isAdmin() || isBranchManager());
+      allow delete: if isAdmin();
     }
     
     match /notifications/{notificationId} {
