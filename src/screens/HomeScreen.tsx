@@ -183,9 +183,6 @@ export default function HomeScreen() {
 
   const handleDeleteNotification = async (id: string, title: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn thông báo "${title}"? Thông báo này sẽ bị gỡ khỏi toàn bộ hệ thống.`)) {
-      return;
-    }
     try {
       await deleteDoc(doc(db, 'notifications', id));
       setNotifications(prev => prev.filter(n => n.id !== id));
@@ -195,10 +192,8 @@ export default function HomeScreen() {
       try {
         window.dispatchEvent(new CustomEvent('notification_deleted', { detail: { id } }));
       } catch {}
-      alert("Đã xóa thông báo thành công!");
     } catch (err: any) {
       console.error("Lỗi khi xóa thông báo:", err);
-      alert("Không thể xóa thông báo: " + (err?.message || "Lỗi mạng hoặc phân quyền"));
     }
   };
 
@@ -245,12 +240,14 @@ export default function HomeScreen() {
             name: u.name || '',
             committeeRole: u.committeeRole || '',
             branchRole: u.branchRole || '',
-            branch: u.branch || 'Đoàn khoa ĐTVT',
+            branch: u.branch || (u.role === 'admin' ? 'Đoàn khoa ĐT-VT' : ''),
             avatar: u.avatar || u.photoURL || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
           });
         } else {
           const existing = userMap.get(key);
           const preferU = (u.updatedAt || 0) >= (existing.updatedAt || 0);
+          const rawBranch = preferU ? (u.branch || existing.branch || '') : (existing.branch || u.branch || '');
+          const safeBranch = rawBranch || (u.role === 'admin' || existing.role === 'admin' ? 'Đoàn khoa ĐT-VT' : '');
           userMap.set(key, {
             ...existing,
             ...u,
@@ -261,7 +258,7 @@ export default function HomeScreen() {
             committeeTerm: preferU ? (u.committeeTerm || existing.committeeTerm) : (existing.committeeTerm || u.committeeTerm),
             committeePeriod: preferU ? (u.committeePeriod || existing.committeePeriod) : (existing.committeePeriod || u.committeePeriod),
             branchTerm: preferU ? (u.branchTerm || existing.branchTerm) : (existing.branchTerm || u.branchTerm),
-            branch: preferU ? (u.branch || existing.branch || 'Đoàn khoa ĐTVT') : (existing.branch || u.branch || 'Đoàn khoa ĐTVT'),
+            branch: safeBranch,
           });
         }
       }

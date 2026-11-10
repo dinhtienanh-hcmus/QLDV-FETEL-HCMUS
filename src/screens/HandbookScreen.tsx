@@ -361,7 +361,7 @@ export default function HandbookScreen() {
         userId: currentUser.uid,
         authorName: (currentUser.name || 'Đoàn viên').slice(0, 250),
         mssv: (currentUser.mssv || '').slice(0, 64),
-        branch: (currentUser.branch || 'Đoàn khoa ĐTVT').slice(0, 120),
+        branch: (currentUser.branch || (currentUser.role === 'admin' ? 'Đoàn khoa ĐT-VT' : '')).slice(0, 120),
         email: (currentUser.email || '').slice(0, 250),
         title: ideaTitle.trim().slice(0, 500),
         category: ideaCategory.slice(0, 120),
@@ -1176,7 +1176,7 @@ export default function HandbookScreen() {
                     </div>
                     <div>
                       <span className="text-[10px] font-bold text-slate-400 uppercase block">Chi đoàn / Đơn vị</span>
-                      <span className="font-bold text-red-600">{currentUser?.branch || 'Đoàn khoa ĐTVT'}</span>
+                      <span className="font-bold text-red-600">{currentUser?.branch || (currentUser?.role === 'admin' ? 'Đoàn khoa ĐT-VT' : 'Chưa phân Chi đoàn')}</span>
                     </div>
                   </div>
 

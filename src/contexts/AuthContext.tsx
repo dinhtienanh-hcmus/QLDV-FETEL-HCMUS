@@ -85,9 +85,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             const defaultCommitteeRole = data.committeeRole || (isBranchAccount ? 'Chi đoàn' : '');
             const defaultBranchRole = data.branchRole || '';
-            const defaultBranch = isBranchAccount 
+            const defaultBranch = isDefaultAdmin 
+              ? 'Đoàn khoa ĐTVT'
+              : isBranchAccount 
               ? (extractedBranch || data.branch || 'Chi đoàn')
-              : (data.branch || 'Đoàn khoa ĐTVT');
+              : (data.branch === 'Đoàn khoa ĐTVT' || data.branch === 'Đoàn khoa ĐT-VT' ? '' : (data.branch || ''));
 
             appUser = {
               ...firebaseUser,
@@ -151,9 +153,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (isDefaultAdmin) defaultRole = 'admin';
             else if (isBranchAccount) defaultRole = 'chidoan';
 
-            const defaultBranchName = isBranchAccount 
+            const defaultBranchName = isDefaultAdmin 
+              ? 'Đoàn khoa ĐTVT' 
+              : isBranchAccount 
               ? (extractedBranch || matchedProfile?.branch || 'Chi đoàn')
-              : (matchedProfile?.branch || 'Đoàn khoa ĐTVT');
+              : (matchedProfile?.branch && matchedProfile.branch !== 'Đoàn khoa ĐTVT' && matchedProfile.branch !== 'Đoàn khoa ĐT-VT' ? matchedProfile.branch : '');
 
             const rawProfileName = (matchedProfile?.name || '').trim();
             const profileHasQuestion = rawProfileName.includes('?');
@@ -162,7 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const defaultName = isDefaultAdmin 
               ? 'BCH Đoàn khoa ĐTVT' 
               : isBranchAccount
-              ? `BCH Chi đoàn ${defaultBranchName}`
+              ? `BCH Chi đoàn ${defaultBranchName || 'Chi đoàn'}`
               : (!profileHasQuestion && rawProfileName ? rawProfileName : (cleanDisplayName || rawProfileName || userEmailLower.split('@')[0] || 'Đoàn viên'));
 
             const defaultCommitteeRole = isBranchAccount ? 'Chi đoàn' : (matchedProfile?.committeeRole || '');
@@ -215,8 +219,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const fallbackRole: 'admin' | 'chidoan' | 'doanvien' =
             isDefaultAdmin ? 'admin' : isBranchAccount ? 'chidoan' : (cachedData?.role || 'doanvien');
-          const fallbackBranch =
-            cachedData?.branch || (isBranchAccount ? (extractedBranch || 'Chi đoàn') : 'Đoàn khoa ĐTVT');
+          const fallbackBranch = isDefaultAdmin
+            ? 'Đoàn khoa ĐTVT'
+            : isBranchAccount
+            ? (extractedBranch || 'Chi đoàn')
+            : (cachedData?.branch && cachedData.branch !== 'Đoàn khoa ĐTVT' && cachedData.branch !== 'Đoàn khoa ĐT-VT' ? cachedData.branch : '');
           const fallbackName =
             cachedData?.name ||
             (isDefaultAdmin

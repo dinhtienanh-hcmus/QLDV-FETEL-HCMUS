@@ -10,6 +10,7 @@ import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { getGoogleSheetsAccessToken, hasCachedToken, createTrackingSpreadsheet, syncTrackingSpreadsheet, extractSpreadsheetId } from '../lib/googleSheets';
 import { getGmailAccessToken, getCachedGmailToken, getCachedGmailEmail, hasCachedGmailToken, setCachedGmailToken, fetchRecentEmails, fetchAttachmentContent, sendBulkNotificationEmail, GmailMessageSummary, EmailAttachment } from '../lib/gmail';
+import { matchStudentTo25ICD } from '../data/canonicalRoster';
 
 const VIETNAMESE_REPAIR_MAP: Record<string, string> = {
   'Ph?m': 'Phạm', 'Nguy?n': 'Nguyễn', 'B?o': 'Bảo', 'H?i': 'Hải', 'Ðang': 'Đăng', 'Qu?c': 'Quốc',
@@ -131,6 +132,8 @@ export default function AdminScreen() {
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
   const [searchBch, setSearchBch] = useState('');
   const [userPage, setUserPage] = useState(1);
+  const [isCleaningUsers, setIsCleaningUsers] = useState(false);
+  const [cleanResultMsg, setCleanResultMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const USERS_PER_PAGE = 25;
 
   const filteredUsersList = useMemo(() => {
@@ -593,19 +596,14 @@ export default function AdminScreen() {
   };
 
   const handleDeleteAnnouncement = async (id: string, title: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn thông báo "${title}" khỏi hệ thống?`)) {
-      return;
-    }
     try {
       await deleteDoc(doc(db, 'notifications', id));
       setAnnouncementsList(prev => prev.filter(a => a.id !== id));
       try {
         window.dispatchEvent(new CustomEvent('notification_deleted', { detail: { id } }));
       } catch {}
-      alert("Đã xóa thông báo thành công!");
     } catch (err: any) {
       console.error("Lỗi khi xóa thông báo:", err);
-      alert("Không thể xóa thông báo: " + (err?.message || "Lỗi không xác định"));
     }
   };
 
@@ -913,9 +911,6 @@ export default function AdminScreen() {
   };
 
   const handleCleanKhoa2024 = async () => {
-    if (!window.confirm("Bạn có chắc chắn muốn xóa toàn bộ các Chi đoàn thuộc khóa 2024 (24DTV, 24ICD,...) khỏi hệ thống?")) {
-      return;
-    }
     try {
       const snap = await getDocs(collection(db, 'branches'));
       let count = 0;
@@ -927,7 +922,7 @@ export default function AdminScreen() {
         }
       }
       await fetchBranches();
-      alert(`Đã hoàn tất dọn dẹp và xóa ${count} Chi đoàn khóa 2024!`);
+      await handleAutoCleanAndSyncUsers(false);
     } catch (e: any) {
       console.error(e);
       alert("Lỗi khi xóa Chi đoàn khóa 2024: " + (e?.message || "Lỗi mạng"));
@@ -1317,11 +1312,189 @@ export default function AdminScreen() {
     }
   };
 
+  const handleAutoCleanAndSyncUsers = async (silent = false) => {
+    if (!isAdmin) return;
+    setIsCleaningUsers(true);
+    if (!silent) setCleanResultMsg(null);
+
+    try {
+      const snapshot = await getDocs(collection(db, 'users'));
+      const allDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+      let deletedK24Count = 0;
+      let deletedJunkCount = 0;
+      let updatedStudentCount = 0;
+      let deletedDuplicatePlaceholders = 0;
+
+      const placeholdersToDelete = new Set<string>();
+
+      for (const u of allDocs) {
+        const uId = u.id;
+        const uName = String(u.name || '').trim();
+        const uMssv = String(u.mssv || u.username || '').trim();
+        const uBranch = String(u.branch || '').trim();
+        const uEmail = String(u.email || '').toLowerCase().trim();
+        const uRole = u.role || 'doanvien';
+
+        // 1. Identify K24 accounts and placeholders to delete
+        const isK24 = 
+          uId.startsWith('profile_24') ||
+          uMssv.startsWith('24') ||
+          /^(chi\s*đoàn\s*)?24/i.test(uBranch) ||
+          uName.includes('24_') ||
+          /24\d{6}/.test(uName) ||
+          /24\d{6}/.test(uEmail);
+
+        if (isK24) {
+          try {
+            await deleteDoc(doc(db, 'users', uId));
+            deletedK24Count++;
+          } catch (e) {
+            console.warn('Could not delete K24 doc:', uId, e);
+          }
+          continue;
+        }
+
+        // 2. Identify obvious junk / test nicknames
+        const JUNK_EMAILS = ['datsky303@gmail.com', 'rubikkup.247@gmail.com', 'kirito6685@gmail.com'];
+        const isJunkAccount = 
+          JUNK_EMAILS.includes(uEmail) || 
+          (!uName && !uMssv && !uEmail) ||
+          (uRole === 'doanvien' && !uId.startsWith('profile_') && !uMssv && (uName === 'Rubikkup' || uName === 'Đạt Sky' || uName === 'Tân Kỳ'));
+
+        if (isJunkAccount) {
+          try {
+            await deleteDoc(doc(db, 'users', uId));
+            deletedJunkCount++;
+          } catch (e) {
+            console.warn('Could not delete junk doc:', uId, e);
+          }
+          continue;
+        }
+
+        // 3. Fix 25ICD1 duplicate placeholders (e.g. profile_25300036)
+        if (uId.startsWith('profile_253000')) {
+          try {
+            await deleteDoc(doc(db, 'users', uId));
+            deletedDuplicatePlaceholders++;
+          } catch {}
+          continue;
+        }
+
+        // 4. Reconcile active student accounts (role === 'doanvien', signed in via Google)
+        // If student is mislabeled as "Đoàn khoa ĐTVT" or has empty MSSV or distorted name
+        if (!uId.startsWith('profile_') && uRole === 'doanvien' && uEmail !== 'dinhtienanh.hcmus@gmail.com' && uEmail !== 'dkdtvt.hcmus@gmail.com') {
+          const isMislabeledDoanKhoa = uBranch === 'Đoàn khoa ĐTVT' || uBranch === 'Đoàn khoa ĐT-VT' || !uBranch;
+          
+          // Try to match student to 25ICD canonical roster
+          const match = matchStudentTo25ICD(uName, uEmail);
+          if (match) {
+            const updates: any = {
+              name: match.name,
+              mssv: match.mssv,
+              username: match.mssv,
+              branch: '25ICD',
+              updatedAt: Date.now()
+            };
+            if (uEmail.includes('@student.hcmus.edu.vn')) {
+              updates.email = '';
+            }
+            await updateDoc(doc(db, 'users', uId), updates);
+            updatedStudentCount++;
+
+            if (match.profileId) {
+              placeholdersToDelete.add(match.profileId);
+            }
+            placeholdersToDelete.add(`profile_${match.mssv}`);
+          } else if (isMislabeledDoanKhoa) {
+            // Check if matches 26ICD (e.g. Minh Triết)
+            if (uEmail === 'triet6985@gmail.com' || uName.toLowerCase().includes('minh triet')) {
+              await updateDoc(doc(db, 'users', uId), {
+                name: 'Nguyễn Đặng Minh Triết',
+                mssv: '26300078',
+                username: '26300078',
+                branch: '26ICD',
+                updatedAt: Date.now()
+              });
+              updatedStudentCount++;
+            } else if (uEmail === 'dinhtienanh.ltt2006@gmail.com') {
+              // Admin personal alt account
+              await updateDoc(doc(db, 'users', uId), { branch: 'Đoàn khoa ĐT-VT', role: 'admin', updatedAt: Date.now() });
+            } else {
+              // Other regular student: reset branch to empty, never Đoàn khoa ĐTVT
+              await updateDoc(doc(db, 'users', uId), { branch: '', updatedAt: Date.now() });
+            }
+          }
+        }
+      }
+
+      // Delete redundant placeholder profiles that were merged with active user accounts
+      for (const pId of placeholdersToDelete) {
+        try {
+          await deleteDoc(doc(db, 'users', pId));
+          deletedDuplicatePlaceholders++;
+        } catch {}
+      }
+
+      // 5. Clean and sync system/bch_cache
+      try {
+        const freshSnap = await getDocs(collection(db, 'users'));
+        const freshUsers = freshSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+        
+        const cleanBchMembers = freshUsers.filter((u: any) => {
+          const hasCommRole = Boolean(u.committeeRole && String(u.committeeRole).trim() !== '');
+          const hasBrRole = Boolean(u.branchRole && String(u.branchRole).trim() !== '');
+          if (!hasCommRole && !hasBrRole) return false;
+          
+          const b = String(u.branch || '').trim();
+          const m = String(u.mssv || u.username || '').trim();
+          const n = String(u.name || '').trim();
+          if (/^(chi\s*đoàn\s*)?24/i.test(b) || m.startsWith('24') || n.includes('24_') || u.id.startsWith('profile_24')) {
+            return false;
+          }
+          return true;
+        }).map((m: any) => {
+          if (m.branch === '25ICD1') {
+            return { ...m, branch: '25ICD' };
+          }
+          return m;
+        });
+
+        await setDoc(doc(db, 'system', 'bch_cache'), { members: cleanBchMembers, updatedAt: Date.now() }, { merge: true });
+        localStorage.setItem('cached_bch_members', JSON.stringify(cleanBchMembers));
+        window.dispatchEvent(new CustomEvent('bch_updated', { detail: cleanBchMembers }));
+      } catch (e) {
+        console.warn('Could not update bch_cache:', e);
+      }
+
+      const summaryMsg = `Hoàn tất dọn dẹp: Đã xóa ${deletedK24Count} hồ sơ/tài khoản K24, ${deletedJunkCount} tài khoản rác, ${deletedDuplicatePlaceholders} hồ sơ tạm; Đã chuẩn hóa ${updatedStudentCount} tài khoản sinh viên về đúng Chi đoàn 25ICD/26ICD và cập nhật BCH lên Trang chủ.`;
+      setCleanResultMsg({ type: 'success', text: summaryMsg });
+    } catch (err: any) {
+      console.error('Error during auto clean:', err);
+      setCleanResultMsg({ type: 'error', text: 'Có lỗi xảy ra trong quá trình dọn dẹp: ' + (err?.message || 'Lỗi mạng') });
+    } finally {
+      setIsCleaningUsers(false);
+    }
+  };
+
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
       const snapshot = await getDocs(collection(db, 'users'));
       const rawUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+      // Auto-trigger clean & sync if admin is viewing and legacy invalid data is detected
+      if (isAdmin) {
+        const hasLegacyInvalid = rawUsers.some(u => 
+          u.id.startsWith('profile_24') || 
+          (u.mssv && String(u.mssv).startsWith('24')) ||
+          u.id.startsWith('profile_253000') ||
+          (u.role === 'doanvien' && !u.id.startsWith('profile_') && (u.branch === 'Đoàn khoa ĐTVT' || u.branch === 'Đoàn khoa ĐT-VT') && u.email !== 'dinhtienanh.hcmus@gmail.com' && u.email !== 'dkdtvt.hcmus@gmail.com')
+        );
+        if (hasLegacyInvalid && !isCleaningUsers) {
+          handleAutoCleanAndSyncUsers(true).catch(console.error);
+        }
+      }
       
       // 1. Phân loại tài khoản đã đăng nhập thực tế (dùng Auth UID)
       const activeUserMssvs = new Set<string>();
@@ -2328,10 +2501,20 @@ export default function AdminScreen() {
       });
       setUsersList(updatedList);
 
-      // 4. Compute updated BCH members list
+      // 4. Compute updated BCH members list (excluding 2024)
       const freshBch = updatedList.filter(
-        (u: any) => (u.committeeRole && String(u.committeeRole).trim() !== '') || (u.branchRole && String(u.branchRole).trim() !== '')
-      );
+        (u: any) => {
+          const hasRole = (u.committeeRole && String(u.committeeRole).trim() !== '') || (u.branchRole && String(u.branchRole).trim() !== '');
+          if (!hasRole) return false;
+          const b = String(u.branch || '').trim();
+          const m = String(u.mssv || u.username || '').trim();
+          const n = String(u.name || '').trim();
+          if (/^(chi\s*đoàn\s*)?24/i.test(b) || m.startsWith('24') || n.includes('24_') || u.id.startsWith('profile_24')) {
+            return false;
+          }
+          return true;
+        }
+      ).map((m: any) => m.branch === '25ICD1' ? { ...m, branch: '25ICD' } : m);
 
       // 5. CRITICAL: Await updating system/bch_cache so HomeScreen and other views get fresh data on 1st read
       await setDoc(doc(db, 'system', 'bch_cache'), { members: freshBch, updatedAt: Date.now() }, { merge: true });
@@ -3187,6 +3370,36 @@ export default function AdminScreen() {
                      </label>
                   </div>
                 </div>
+
+                {isAdmin && (
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-4 rounded-xl shadow-sm border border-amber-200">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-xs font-bold text-amber-900 flex items-center">
+                          <Sparkles size={15} className="mr-1.5 text-amber-600" />
+                          Dọn dẹp tài khoản không hợp lệ & Chuẩn hóa Chi đoàn
+                        </h4>
+                        <p className="text-[11px] text-amber-700 mt-1">
+                          Tự động xóa tài khoản/hồ sơ K24 và tài khoản rác; tự động phân loại lại các tài khoản cá nhân về đúng Chi đoàn 25ICD, gán đúng MSSV và họ tên; đồng bộ danh sách BCH lên Trang chủ.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleAutoCleanAndSyncUsers(false)}
+                        disabled={isCleaningUsers}
+                        className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shrink-0 flex items-center justify-center transition shadow-sm cursor-pointer"
+                      >
+                        <Sparkles size={14} className={`mr-1.5 ${isCleaningUsers ? 'animate-spin' : ''}`} />
+                        {isCleaningUsers ? 'Đang dọn dẹp...' : 'Dọn dẹp & Chuẩn hóa ngay'}
+                      </button>
+                    </div>
+                    {cleanResultMsg && (
+                      <div className={`mt-2.5 p-2.5 rounded-lg text-xs font-medium ${cleanResultMsg.type === 'success' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-red-100 text-red-800 border border-red-300'}`}>
+                        {cleanResultMsg.text}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
 

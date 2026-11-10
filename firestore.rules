@@ -101,7 +101,7 @@ service cloud.firestore {
     // --- Collections ---
 
     match /system/{docId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isSignedIn();
     }
 
