@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { collection, addDoc, getDocs, getDoc, query, orderBy, deleteDoc, doc, updateDoc, setDoc, writeBatch } from 'firebase/firestore';
 import { db, firebaseConfig, isQuotaExceededError, isOfflineOrNetworkError } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, ExternalLink, QrCode, CheckCircle2, Clock, RefreshCw, Link2, Unlink, Sparkles, Settings, Mail, Send, Paperclip, FileText, Download, CheckSquare, Square, CornerUpRight, Inbox, Eye, AlertCircle } from 'lucide-react';
+import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, List, Edit2, Camera, ExternalLink, QrCode, CheckCircle2, Clock, RefreshCw, Link2, Unlink, Sparkles, Settings, Mail, Send, Paperclip, FileText, Download, CheckSquare, Square, CornerUpRight, Inbox, Eye, AlertCircle, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
@@ -130,6 +130,42 @@ export default function AdminScreen() {
   const [userSearch, setUserSearch] = useState('');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
   const [searchBch, setSearchBch] = useState('');
+  const [userPage, setUserPage] = useState(1);
+  const USERS_PER_PAGE = 25;
+
+  const filteredUsersList = useMemo(() => {
+    return usersList.filter((u: any) => {
+      if (!isUserInMyBranch(u)) return false;
+      if (isAdmin && selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
+        return false;
+      }
+      const q = userSearch.toLowerCase().trim();
+      if (!q) return true;
+      const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+      const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+      const isFlipped = nameIsNumeric && mssvHasText;
+      const displayName = isFlipped ? u.mssv : (u.name || '');
+      const displayMssv = isFlipped ? u.name : (u.mssv || u.username || '');
+
+      return (
+        displayName.toLowerCase().includes(q) ||
+        displayMssv.toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.branch || '').toLowerCase().includes(q)
+      );
+    });
+  }, [usersList, isAdmin, isBranch, currentUser?.branch, selectedBranchFilter, userSearch]);
+
+  const totalUserPages = Math.max(1, Math.ceil(filteredUsersList.length / USERS_PER_PAGE));
+  const currentPageSafe = Math.min(Math.max(1, userPage), totalUserPages);
+  const paginatedUsers = useMemo(() => {
+    const start = (currentPageSafe - 1) * USERS_PER_PAGE;
+    return filteredUsersList.slice(start, start + USERS_PER_PAGE);
+  }, [filteredUsersList, currentPageSafe]);
+
+  useEffect(() => {
+    setUserPage(1);
+  }, [userSearch, selectedBranchFilter]);
 
   // Gmail & Announcements State
   const [gmailConnectedEmail, setGmailConnectedEmail] = useState<string | null>(() => getCachedGmailEmail());
@@ -145,6 +181,8 @@ export default function AdminScreen() {
   const [announceTarget, setAnnounceTarget] = useState<'branches' | 'all' | 'custom'>('branches');
   const [selectedBranchesForMail, setSelectedBranchesForMail] = useState<string[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<Array<{ filename: string; mimeType: string; size: number; dataBase64?: string; attachmentId?: string; messageId?: string }>>([]);
+  const [customRecipients, setCustomRecipients] = useState<string[]>([]);
+  const [newRecipientInput, setNewRecipientInput] = useState('');
   const [sendViaInApp, setSendViaInApp] = useState(true);
   const [sendViaGmail, setSendViaGmail] = useState(true);
 
@@ -320,7 +358,7 @@ export default function AdminScreen() {
       fetchHandbookTopics();
       fetchAnnouncements();
     }
-  }, [currentUser, isAdmin, isBranch]);
+  }, [currentUser?.uid, isAdmin, isBranch]);
 
   const fetchBchTerms = async () => {
     let dkTerms = DEFAULT_DOAN_KHOA_TERMS;
@@ -554,6 +592,23 @@ export default function AdminScreen() {
     }
   };
 
+  const handleDeleteAnnouncement = async (id: string, title: string) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn thông báo "${title}" khỏi hệ thống?`)) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, 'notifications', id));
+      setAnnouncementsList(prev => prev.filter(a => a.id !== id));
+      try {
+        window.dispatchEvent(new CustomEvent('notification_deleted', { detail: { id } }));
+      } catch {}
+      alert("Đã xóa thông báo thành công!");
+    } catch (err: any) {
+      console.error("Lỗi khi xóa thông báo:", err);
+      alert("Không thể xóa thông báo: " + (err?.message || "Lỗi không xác định"));
+    }
+  };
+
   const handleConnectGmail = async () => {
     setIsConnectingGmail(true);
     setSendResultMsg(null);
@@ -699,6 +754,14 @@ export default function AdminScreen() {
       }
     });
 
+    // Append custom recipients
+    customRecipients.forEach(cr => {
+      const clean = cr.trim();
+      if (clean && clean.includes('@') && !list.includes(clean)) {
+        list.push(clean);
+      }
+    });
+
     return list;
   };
 
@@ -717,6 +780,7 @@ export default function AdminScreen() {
     setSendResultMsg(null);
     try {
       let emailSuccess = 0;
+      let senderEmail = 'dkdtvt.hcmus@gmail.com';
 
       // 1. In-App Notification
       if (sendViaInApp) {
@@ -738,6 +802,7 @@ export default function AdminScreen() {
           : await getGmailAccessToken(true, 'dkdtvt.hcmus@gmail.com');
         
         setGmailConnectedEmail(tokenInfo.email);
+        senderEmail = tokenInfo.email;
 
         // Resolve any pending attachment data
         const resolvedAttachments: Array<{ filename: string; mimeType: string; dataBase64: string }> = [];
@@ -760,8 +825,9 @@ export default function AdminScreen() {
 
         const recipientEmails = getRecipientEmailsList();
         const res = await sendBulkNotificationEmail(tokenInfo.token, {
-          fromEmail: 'dkdtvt.hcmus@gmail.com',
+          fromEmail: tokenInfo.email,
           fromName: 'BCH Đoàn khoa Điện tử - Viễn thông',
+          replyToEmail: 'dkdtvt.hcmus@gmail.com',
           recipients: recipientEmails,
           subject: announceTitle,
           bodyText: announceBody,
@@ -773,19 +839,21 @@ export default function AdminScreen() {
       setShowSendConfirmModal(false);
       setSendResultMsg({
         type: 'success',
-        text: `Đã phát hành thông báo thành công!${sendViaGmail ? ` (Đã gửi email đến ${emailSuccess} địa chỉ BCH Chi đoàn từ dkdtvt.hcmus@gmail.com)` : ''}`
+        text: `Đã phát hành thông báo thành công!${sendViaGmail ? ` (Đã gửi email đến ${emailSuccess} địa chỉ từ hộp thư ${senderEmail})` : ''}`
       });
       // Reset form
       setAnnounceTitle('');
       setAnnounceBody('');
       setAttachedFiles([]);
+      setCustomRecipients([]);
       setSelectedEmailSource(null);
       fetchAnnouncements();
     } catch (err: any) {
       console.error('Lỗi phát hành thông báo:', err);
+      setShowSendConfirmModal(false);
       setSendResultMsg({
         type: 'error',
-        text: err?.message || 'Không thể gửi thông báo. Vui lòng kiểm tra lại quyền truy cập Gmail!'
+        text: err?.message || 'Không thể gửi email. Bạn vui lòng bấm nút "Kết nối Gmail Đoàn khoa" ở trên để cấp quyền gửi trước nhé!'
       });
     } finally {
       setIsSendingAnnouncement(false);
@@ -2034,8 +2102,20 @@ export default function AdminScreen() {
         updates.role = userEditForm.role;
       }
 
-      await updateDoc(doc(db, 'users', editingUserInfo.id), updates);
-      setUsersList(prev => prev.map(u => u.id === editingUserInfo.id ? { ...u, ...updates } : u));
+      await setDoc(doc(db, 'users', editingUserInfo.id), updates, { merge: true });
+      const updatedList = usersList.map(u => u.id === editingUserInfo.id ? { ...u, ...updates } : u);
+      setUsersList(updatedList);
+      
+      const freshBch = updatedList.filter(
+        (u: any) => (u.committeeRole && String(u.committeeRole).trim() !== '') || (u.branchRole && String(u.branchRole).trim() !== '')
+      );
+      setDoc(doc(db, 'system', 'bch_cache'), { members: freshBch, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+      try {
+        localStorage.setItem('cached_bch_members', JSON.stringify(freshBch));
+        localStorage.setItem('cached_admin_users', JSON.stringify(updatedList));
+        window.dispatchEvent(new CustomEvent('bch_updated', { detail: freshBch }));
+      } catch {}
+
       setEditingUserInfo(null);
       alert("Cập nhật thông tin đoàn viên thành công!");
     } catch (err) {
@@ -2049,7 +2129,19 @@ export default function AdminScreen() {
     const nameStr = deletingUser.name || deletingUser.email || deletingUser.username || deletingUser.id;
     try {
       await deleteDoc(doc(db, 'users', deletingUser.id));
-      setUsersList(prev => prev.filter(item => item.id !== deletingUser.id));
+      const remainingList = usersList.filter(item => item.id !== deletingUser.id);
+      setUsersList(remainingList);
+      
+      const freshBch = remainingList.filter(
+        (u: any) => (u.committeeRole && String(u.committeeRole).trim() !== '') || (u.branchRole && String(u.branchRole).trim() !== '')
+      );
+      setDoc(doc(db, 'system', 'bch_cache'), { members: freshBch, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+      try {
+        localStorage.setItem('cached_bch_members', JSON.stringify(freshBch));
+        localStorage.setItem('cached_admin_users', JSON.stringify(remainingList));
+        window.dispatchEvent(new CustomEvent('bch_updated', { detail: freshBch }));
+      } catch {}
+
       setDeletingUser(null);
       alert(`Đã xóa tài khoản "${nameStr}" thành công.`);
     } catch (e) {
@@ -2081,6 +2173,7 @@ export default function AdminScreen() {
 
     updates.committeeRole = commRole || null;
     updates.branchRole = brRole || null;
+    updates.updatedAt = Date.now();
 
     if (!commRole && !brRole) {
        updates.committeePeriod = null;
@@ -2098,13 +2191,66 @@ export default function AdminScreen() {
     }
     
     try {
-      await updateDoc(doc(db, 'users', editingBchUser.id), updates);
+      // 1. Identify all document IDs associated with this person (Auth UID, profile_<mssv>, etc.)
+      const targetDocIds = new Set<string>();
+      if (editingBchUser.id) targetDocIds.add(editingBchUser.id);
+      
+      const cleanMssv = (editingBchUser.mssv || editingBchUser.username || '').toLowerCase().trim();
+      if (cleanMssv) {
+        targetDocIds.add(`profile_${cleanMssv}`);
+      }
+      const cleanEmail = (editingBchUser.email || '').toLowerCase().trim();
+
+      // Scan usersList for any matching accounts to ensure multi-record synchronization
+      usersList.forEach(u => {
+        const uMssv = (u.mssv || u.username || '').toLowerCase().trim();
+        const uEmail = (u.email || '').toLowerCase().trim();
+        if ((cleanMssv && uMssv === cleanMssv) || (cleanEmail && uEmail === cleanEmail)) {
+          if (u.id) targetDocIds.add(u.id);
+        }
+      });
+
+      // 2. Persist to all matching user docs via setDoc with merge (safe against missing documents)
+      for (const docId of targetDocIds) {
+        await setDoc(doc(db, 'users', docId), updates, { merge: true });
+      }
+
+      // 3. Immediately update in-memory usersList for instant UI response
+      const updatedList = usersList.map(u => {
+        const uMssv = (u.mssv || u.username || '').toLowerCase().trim();
+        const uEmail = (u.email || '').toLowerCase().trim();
+        const isMatch = targetDocIds.has(u.id) || 
+          Boolean(cleanMssv && uMssv === cleanMssv) || 
+          Boolean(cleanEmail && uEmail === cleanEmail);
+        return isMatch ? { ...u, ...updates } : u;
+      });
+      setUsersList(updatedList);
+
+      // 4. Compute updated BCH members list
+      const freshBch = updatedList.filter(
+        (u: any) => (u.committeeRole && String(u.committeeRole).trim() !== '') || (u.branchRole && String(u.branchRole).trim() !== '')
+      );
+
+      // 5. CRITICAL: Await updating system/bch_cache so HomeScreen and other views get fresh data on 1st read
+      await setDoc(doc(db, 'system', 'bch_cache'), { members: freshBch, updatedAt: Date.now() }, { merge: true });
+
+      // 6. Synchronize localStorage
+      try {
+        localStorage.setItem('cached_bch_members', JSON.stringify(freshBch));
+        localStorage.setItem('cached_admin_users', JSON.stringify(updatedList));
+      } catch {}
+
+      // 7. Dispatch global event so HomeScreen (even if active in background) re-renders immediately
+      try {
+        window.dispatchEvent(new CustomEvent('bch_updated', { detail: freshBch }));
+      } catch {}
+
       setEditingBchUser(null);
+      alert("Cập nhật chức vụ thành công và đã đồng bộ ngay lập tức lên Trang chủ!");
       fetchUsers();
-      alert("Cập nhật chức vụ thành công!");
     } catch(e) {
-      console.error(e);
-      alert("Lỗi cập nhật chức vụ");
+      console.error("Lỗi cập nhật chức vụ:", e);
+      alert("Lỗi khi cập nhật chức vụ. Vui lòng kiểm tra kết nối mạng.");
     }
   };
 
@@ -2990,130 +3136,140 @@ export default function AdminScreen() {
               {loadingUsers ? (
                 <p className="text-xs text-center text-slate-500 py-4">Đang tải danh sách tài khoản...</p>
               ) : (
-                <div className="space-y-2 max-h-[550px] overflow-y-auto pr-1 no-scrollbar">
-                   {usersList
-                    .filter((u: any) => {
-                      if (!isUserInMyBranch(u)) return false;
-                      if (isAdmin && selectedBranchFilter && (u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
-                        return false;
-                      }
-                      const q = userSearch.toLowerCase().trim();
-                      if (!q) return true;
-                      const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
-                      const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
-                      const isFlipped = nameIsNumeric && mssvHasText;
-                      const displayName = isFlipped ? u.mssv : (u.name || '');
-                      const displayMssv = isFlipped ? u.name : (u.mssv || u.username || '');
+                <>
+                  <div className="space-y-2 max-h-[550px] overflow-y-auto pr-1 no-scrollbar">
+                     {paginatedUsers.map((u: any) => {
+                       const isStudent = u.role === 'doanvien' || !u.role;
+                       const isPlaceholder = u.id.startsWith('profile_');
+                       const hasRealGoogleEmail = Boolean(u.email && !u.email.includes('@student.hcmus.edu.vn') && u.email.includes('@'));
+                       const isMerged = !isPlaceholder && (u.isMerged === true || hasRealGoogleEmail);
 
-                      return (
-                        displayName.toLowerCase().includes(q) ||
-                        displayMssv.toLowerCase().includes(q) ||
-                        (u.email || '').toLowerCase().includes(q) ||
-                        (u.branch || '').toLowerCase().includes(q)
+                       // Robust check: never render numbers as name and person name as MSSV
+                       const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
+                       const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
+                       const isFlipped = nameIsNumeric && mssvHasText;
+                       const displayName = isFlipped ? u.mssv : (u.name || 'Chưa cập nhật tên');
+                       const displayMssv = isFlipped ? u.name : (u.mssv || u.username || '');
+
+                       return (
+                         <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100/80 transition-all">
+                            <div>
+                               <div className="text-xs font-bold text-slate-800 flex items-center gap-2 flex-wrap">
+                                  <span>{displayName}</span>
+                                  {displayMssv && (
+                                    <span className="font-semibold text-slate-600 bg-slate-200/70 px-1.5 py-0.5 rounded text-[11px]">
+                                      MSSV: {displayMssv}
+                                    </span>
+                                  )}
+                               </div>
+                               <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
+                                  <span className="font-semibold text-blue-700">{u.role === 'admin' ? 'QTV Khoa' : u.role === 'chidoan' ? 'BCH Chi đoàn' : 'Đoàn viên'}</span>
+                                  <span>•</span>
+                                  <span className="bg-slate-200/70 text-slate-700 px-1.5 py-0.5 rounded font-medium">{u.branch || 'Chưa phân lớp'}</span>
+                                  {u.committeeRole && (
+                                    <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[9px]">{u.committeeRole}</span>
+                                  )}
+                                  {isStudent ? (
+                                    isMerged && hasRealGoogleEmail ? (
+                                      <>
+                                        <span>•</span>
+                                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-semibold px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
+                                          <CheckCircle2 size={11} className="text-emerald-600" /> Đã liên kết: {u.email}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>•</span>
+                                        <span className="bg-amber-50 text-amber-700 border border-amber-200/80 font-medium px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
+                                          <Clock size={11} className="text-amber-600" /> Chưa liên kết Google (Chờ đăng nhập)
+                                        </span>
+                                      </>
+                                    )
+                                  ) : (
+                                    hasRealGoogleEmail && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="truncate max-w-[180px] text-slate-600 font-medium">{u.email}</span>
+                                      </>
+                                    )
+                                  )}
+                               </div>
+                            </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                             <button onClick={() => handleOpenBchEdit(u)} className="p-1.5 text-amber-700 bg-amber-50 hover:bg-amber-100 rounded text-[10px] font-bold flex items-center shrink-0" title="Gán/Cập nhật chức vụ BCH">
+                                <Users size={12} className="mr-1" /> Gán BCH
+                             </button>
+                             <button onClick={() => handleEditUser(u)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                                <Edit2 size={12} className="mr-1" /> Sửa
+                             </button>
+                             <button onClick={() => setDeletingUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
+                                <Trash2 size={12} className="mr-1" /> Xóa
+                             </button>
+                          </div>
+                        </div>
                       );
-                    })
-                    .map((u: any) => {
-                      const isStudent = u.role === 'doanvien' || !u.role;
-                      const isPlaceholder = u.id.startsWith('profile_');
-                      const hasRealGoogleEmail = Boolean(u.email && !u.email.includes('@student.hcmus.edu.vn') && u.email.includes('@'));
-                      const isMerged = !isPlaceholder && (u.isMerged === true || hasRealGoogleEmail);
-
-                      // Robust check: never render numbers as name and person name as MSSV
-                      const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
-                      const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
-                      const isFlipped = nameIsNumeric && mssvHasText;
-                      const displayName = isFlipped ? u.mssv : (u.name || 'Chưa cập nhật tên');
-                      const displayMssv = isFlipped ? u.name : (u.mssv || u.username || '');
-
-                      return (
-                        <div key={u.id} className="flex justify-between items-center p-3 bg-slate-50 border border-slate-100 rounded-lg hover:bg-slate-100/80 transition-all">
-                           <div>
-                              <div className="text-xs font-bold text-slate-800 flex items-center gap-2 flex-wrap">
-                                 <span>{displayName}</span>
-                                 {displayMssv && (
-                                   <span className="font-semibold text-slate-600 bg-slate-200/70 px-1.5 py-0.5 rounded text-[11px]">
-                                     MSSV: {displayMssv}
-                                   </span>
-                                 )}
-                              </div>
-                              <div className="text-[10px] text-slate-500 mt-1 flex flex-wrap items-center gap-1.5">
-                                 <span className="font-semibold text-blue-700">{u.role === 'admin' ? 'QTV Khoa' : u.role === 'chidoan' ? 'BCH Chi đoàn' : 'Đoàn viên'}</span>
-                                 <span>•</span>
-                                 <span className="bg-slate-200/70 text-slate-700 px-1.5 py-0.5 rounded font-medium">{u.branch || 'Chưa phân lớp'}</span>
-                                 {u.committeeRole && (
-                                   <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[9px]">{u.committeeRole}</span>
-                                 )}
-                                 {isStudent ? (
-                                   isMerged && hasRealGoogleEmail ? (
-                                     <>
-                                       <span>•</span>
-                                       <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-semibold px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
-                                         <CheckCircle2 size={11} className="text-emerald-600" /> Đã liên kết: {u.email}
-                                       </span>
-                                     </>
-                                   ) : (
-                                     <>
-                                       <span>•</span>
-                                       <span className="bg-amber-50 text-amber-700 border border-amber-200/80 font-medium px-2 py-0.5 rounded text-[10px] flex items-center gap-1">
-                                         <Clock size={11} className="text-amber-600" /> Chưa liên kết Google (Chờ đăng nhập)
-                                       </span>
-                                     </>
-                                   )
-                                 ) : (
-                                   hasRealGoogleEmail && (
-                                     <>
-                                       <span>•</span>
-                                       <span className="truncate max-w-[180px] text-slate-600 font-medium">{u.email}</span>
-                                     </>
-                                   )
-                                 )}
-                              </div>
-                           </div>
-                         <div className="flex items-center gap-1.5 shrink-0">
-                            <button onClick={() => handleOpenBchEdit(u)} className="p-1.5 text-amber-700 bg-amber-50 hover:bg-amber-100 rounded text-[10px] font-bold flex items-center shrink-0" title="Gán/Cập nhật chức vụ BCH">
-                               <Users size={12} className="mr-1" /> Gán BCH
-                            </button>
-                            <button onClick={() => handleEditUser(u)} className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center shrink-0">
-                               <Edit2 size={12} className="mr-1" /> Sửa
-                            </button>
-                            <button onClick={() => setDeletingUser(u)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded text-[10px] font-bold flex items-center shrink-0">
-                               <Trash2 size={12} className="mr-1" /> Xóa
-                            </button>
-                         </div>
+                    })}
+                    {filteredUsersList.length === 0 && (
+                       <div className="text-center py-6">
+                         <p className="text-xs text-slate-400 italic mb-2">Không tìm thấy đoàn viên phù hợp.</p>
+                         <button
+                           type="button"
+                           onClick={fetchUsers}
+                           className="text-xs text-blue-600 hover:text-blue-700 font-bold underline cursor-pointer"
+                         >
+                           Bấm vào đây để tải lại danh sách từ máy chủ
+                         </button>
                        </div>
-                     );
-                   })}
-                   {usersList.filter((u: any) => {
-                      if (!isUserInMyBranch(u)) return false;
-                      if (isAdmin && selectedBranchFilter && String(u.branch || '').toLowerCase() !== selectedBranchFilter.toLowerCase()) {
-                        return false;
-                      }
-                      const q = userSearch.toLowerCase().trim();
-                      if (!q) return true;
-                      const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
-                      const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
-                      const isFlipped = nameIsNumeric && mssvHasText;
-                      const displayName = isFlipped ? String(u.mssv || '') : String(u.name || '');
-                      const displayMssv = isFlipped ? String(u.name || '') : String(u.mssv || u.username || '');
-                      return (
-                        displayName.toLowerCase().includes(q) ||
-                        displayMssv.toLowerCase().includes(q) ||
-                        String(u.email || '').toLowerCase().includes(q) ||
-                        String(u.branch || '').toLowerCase().includes(q)
-                      );
-                    }).length === 0 && (
-                      <div className="text-center py-6">
-                        <p className="text-xs text-slate-400 italic mb-2">Không tìm thấy đoàn viên phù hợp.</p>
-                        <button
-                          type="button"
-                          onClick={fetchUsers}
-                          className="text-xs text-blue-600 hover:text-blue-700 font-bold underline cursor-pointer"
-                        >
-                          Bấm vào đây để tải lại danh sách từ máy chủ
-                        </button>
-                      </div>
-                   )}
-                </div>
+                    )}
+                 </div>
+
+                 {filteredUsersList.length > USERS_PER_PAGE && (
+                   <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl mt-3 text-xs text-slate-600">
+                     <div className="font-medium text-[11px] sm:text-xs">
+                       Trang <span className="font-bold text-blue-700">{currentPageSafe}</span> / {totalUserPages}
+                       <span className="text-slate-400 ml-1.5 font-normal">
+                         ({(currentPageSafe - 1) * USERS_PER_PAGE + 1} - {Math.min(currentPageSafe * USERS_PER_PAGE, filteredUsersList.length)} trong tổng số {filteredUsersList.length})
+                       </span>
+                     </div>
+                     <div className="flex items-center gap-1">
+                       <button
+                         type="button"
+                         disabled={currentPageSafe <= 1}
+                         onClick={() => setUserPage(1)}
+                         className="p-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-100 transition cursor-pointer"
+                         title="Trang đầu"
+                       >
+                         <ChevronsLeft size={14} />
+                       </button>
+                       <button
+                         type="button"
+                         disabled={currentPageSafe <= 1}
+                         onClick={() => setUserPage(p => Math.max(1, p - 1))}
+                         className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg font-bold text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-100 transition flex items-center gap-1 cursor-pointer text-xs"
+                       >
+                         <ChevronLeft size={14} /> Trước
+                       </button>
+                       <button
+                         type="button"
+                         disabled={currentPageSafe >= totalUserPages}
+                         onClick={() => setUserPage(p => Math.min(totalUserPages, p + 1))}
+                         className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg font-bold text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-100 transition flex items-center gap-1 cursor-pointer text-xs"
+                       >
+                         Sau <ChevronRight size={14} />
+                       </button>
+                       <button
+                         type="button"
+                         disabled={currentPageSafe >= totalUserPages}
+                         onClick={() => setUserPage(totalUserPages)}
+                         className="p-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-100 transition cursor-pointer"
+                         title="Trang cuối"
+                       >
+                         <ChevronsRight size={14} />
+                       </button>
+                     </div>
+                   </div>
+                 )}
+               </>
               )}
             </div>
           </>
@@ -3195,33 +3351,51 @@ export default function AdminScreen() {
                  <div className="space-y-2 mt-4 pt-4 border-t border-slate-100">
                     <h4 className="font-bold text-slate-700">Đoàn viên khác (chọn để gán vào BCH {isBranch ? `Chi đoàn ${currentUser?.branch || ''}` : ''}):</h4>
                     <div className="max-h-60 overflow-y-auto space-y-2 pr-1 no-scrollbar">
-                       {usersList.filter(u => {
-                          if (!isUserInMyBranch(u)) return false;
-                          if (u.committeeRole) return false;
-                          const q = searchBch.toLowerCase().trim();
-                          if (!q) return true;
-                          return (
-                            (u.name || '').toLowerCase().includes(q) ||
-                            (u.email || '').toLowerCase().includes(q) ||
-                            (u.username || '').toLowerCase().includes(q) ||
-                            (u.mssv || '').toLowerCase().includes(q)
-                          );
-                       }).map((u: any) => (
-                          <div key={u.id} className="flex justify-between items-center p-2 bg-slate-50 border border-slate-100 rounded-lg">
-                             <div>
-                                <div className="font-bold text-slate-800 text-[11px]">{u.name} <span className="font-normal opacity-70">{u.mssv ? `(MSSV: ${u.mssv})` : (u.email ? `(${u.email})` : '')}</span></div>
-                                <div className="text-[9px] text-slate-500 mt-0.5">{u.branch || 'Chưa cập nhật đơn vị'}</div>
-                             </div>
-                             <div className="flex items-center gap-1">
-                                <button onClick={() => handleOpenBchEdit(u)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[9px] font-bold">
-                                   + Thêm vào BCH
-                                </button>
-                                <button onClick={() => setDeletingUser(u)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa tài khoản">
-                                   <Trash2 size={12} />
-                                </button>
-                             </div>
-                          </div>
-                       ))}
+                       {(() => {
+                         const candidateList = usersList.filter(u => {
+                            if (!isUserInMyBranch(u)) return false;
+                            if (u.committeeRole) return false;
+                            const q = searchBch.toLowerCase().trim();
+                            if (!q) return true;
+                            return (
+                              (u.name || '').toLowerCase().includes(q) ||
+                              (u.email || '').toLowerCase().includes(q) ||
+                              (u.username || '').toLowerCase().includes(q) ||
+                              (u.mssv || '').toLowerCase().includes(q)
+                            );
+                         });
+
+                         return (
+                           <>
+                             {candidateList.slice(0, 25).map((u: any) => (
+                                <div key={u.id} className="flex justify-between items-center p-2 bg-slate-50 border border-slate-100 rounded-lg">
+                                   <div>
+                                      <div className="font-bold text-slate-800 text-[11px]">{u.name} <span className="font-normal opacity-70">{u.mssv ? `(MSSV: ${u.mssv})` : (u.email ? `(${u.email})` : '')}</span></div>
+                                      <div className="text-[9px] text-slate-500 mt-0.5">{u.branch || 'Chưa cập nhật đơn vị'}</div>
+                                   </div>
+                                   <div className="flex items-center gap-1">
+                                      <button onClick={() => handleOpenBchEdit(u)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[9px] font-bold">
+                                         + Thêm vào BCH
+                                      </button>
+                                      <button onClick={() => setDeletingUser(u)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Xóa tài khoản">
+                                         <Trash2 size={12} />
+                                      </button>
+                                   </div>
+                                </div>
+                             ))}
+                             {candidateList.length > 25 && (
+                               <p className="text-[10px] text-slate-400 italic text-center py-1">
+                                 Hiển thị 25/{candidateList.length} đoàn viên. Hãy nhập tên hoặc MSSV vào ô tìm kiếm ở trên để lọc chính xác.
+                               </p>
+                             )}
+                             {candidateList.length === 0 && (
+                               <p className="text-[10px] text-slate-400 italic text-center py-2">
+                                 Không tìm thấy đoàn viên phù hợp.
+                               </p>
+                             )}
+                           </>
+                         );
+                       })()}
                     </div>
                  </div>
               </div>
@@ -3989,14 +4163,74 @@ export default function AdminScreen() {
 
                   {/* Recipient preview */}
                   <div className="text-[11px] text-slate-500 pt-1">
-                    Tổng cộng: <strong className="text-blue-700 font-bold">{getRecipientEmailsList().length} địa chỉ email BCH Chi đoàn</strong> sẽ nhận được thư:
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {getRecipientEmailsList().map((em, idx) => (
-                        <span key={idx} className="bg-white border border-slate-200 px-2 py-0.5 rounded text-[10.5px] font-mono text-slate-600">
-                          {em}
-                        </span>
-                      ))}
+                    <div className="flex items-center justify-between">
+                      <span>Tổng cộng: <strong className="text-blue-700 font-bold">{getRecipientEmailsList().length} địa chỉ email</strong> sẽ nhận được thư:</span>
                     </div>
+
+                    <div className="flex flex-wrap gap-1.5 mt-1.5 max-h-36 overflow-y-auto p-1.5 bg-white rounded-lg border border-slate-200">
+                      {getRecipientEmailsList().map((em, idx) => {
+                        const isCustom = customRecipients.includes(em);
+                        return (
+                          <span key={idx} className={`inline-flex items-center gap-1 border px-2 py-0.5 rounded text-[10.5px] font-mono ${
+                            isCustom ? 'bg-blue-50 border-blue-200 text-blue-800 font-semibold' : 'bg-slate-50 border-slate-200 text-slate-600'
+                          }`}>
+                            <span>{em}</span>
+                            {isCustom && (
+                              <button
+                                type="button"
+                                onClick={() => setCustomRecipients(prev => prev.filter(x => x !== em))}
+                                className="text-slate-400 hover:text-rose-600 ml-0.5 font-bold cursor-pointer"
+                                title="Xóa email này"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
+
+                    {/* Add custom email input */}
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <input
+                        type="email"
+                        placeholder="Thêm email nhận (VD: dinhtienanh.hcmus@gmail.com)..."
+                        value={newRecipientInput}
+                        onChange={e => setNewRecipientInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (newRecipientInput.includes('@')) {
+                              setCustomRecipients(prev => Array.from(new Set([...prev, newRecipientInput.trim()])));
+                              setNewRecipientInput('');
+                            }
+                          }
+                        }}
+                        className="flex-1 text-xs p-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (newRecipientInput.includes('@')) {
+                            setCustomRecipients(prev => Array.from(new Set([...prev, newRecipientInput.trim()])));
+                            setNewRecipientInput('');
+                          }
+                        }}
+                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition shrink-0 cursor-pointer"
+                      >
+                        + Thêm người nhận
+                      </button>
+                    </div>
+
+                    {currentUser?.email && !getRecipientEmailsList().includes(currentUser.email) && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomRecipients(prev => Array.from(new Set([...prev, currentUser.email!])))}
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline mt-1.5 inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        + Thêm email của tôi ({currentUser.email}) vào danh sách nhận để thử nghiệm
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -4077,6 +4311,15 @@ export default function AdminScreen() {
                           Phát hành: {formatDateToDDMMYYYY(a.createdAt)} • Người gửi: {a.sentBy || 'BCH Đoàn khoa'}
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAnnouncement(a.id, a.title)}
+                        className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition shrink-0 cursor-pointer border border-transparent hover:border-rose-200 flex items-center gap-1 text-xs font-bold"
+                        title="Xóa thông báo này"
+                      >
+                        <Trash2 size={15} />
+                        <span className="hidden sm:inline">Xóa</span>
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -4858,7 +5101,12 @@ export default function AdminScreen() {
             <div className="space-y-3 text-xs text-slate-700">
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <div className="text-[10px] font-bold text-slate-500 uppercase">Hộp thư gửi chính thức:</div>
-                <div className="font-bold text-blue-700 text-sm mt-0.5">BCH Đoàn khoa ĐTVT &lt;dkdtvt.hcmus@gmail.com&gt;</div>
+                <div className="font-bold text-blue-700 text-sm mt-0.5">
+                  BCH Đoàn khoa ĐTVT &lt;{gmailConnectedEmail || 'dkdtvt.hcmus@gmail.com'}&gt;
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Địa chỉ phản hồi (Reply-To): dkdtvt.hcmus@gmail.com
+                </div>
               </div>
 
               <div>
@@ -4867,13 +5115,37 @@ export default function AdminScreen() {
               </div>
 
               <div>
-                <div className="text-[10px] font-bold text-slate-500 uppercase">Danh sách người nhận ({getRecipientEmailsList().length} email):</div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[10px] font-bold text-slate-500 uppercase">Danh sách người nhận ({getRecipientEmailsList().length} email):</div>
+                  {currentUser?.email && !getRecipientEmailsList().includes(currentUser.email) && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomRecipients(prev => Array.from(new Set([...prev, currentUser.email!])))}
+                      className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                    >
+                      + Thêm email của tôi ({currentUser.email})
+                    </button>
+                  )}
+                </div>
                 <div className="max-h-28 overflow-y-auto p-2 bg-slate-50 rounded-lg border border-slate-200 mt-1 font-mono text-[11px] text-slate-600 space-y-1">
-                  {getRecipientEmailsList().map((em, idx) => (
-                    <div key={idx} className="flex items-center gap-1.5">
-                      <span className="text-slate-400">{idx + 1}.</span> {em}
-                    </div>
-                  ))}
+                  {getRecipientEmailsList().length === 0 ? (
+                    <div className="text-amber-600 italic">Chưa có người nhận nào. Vui lòng thêm email nhận thử ở trên.</div>
+                  ) : (
+                    getRecipientEmailsList().map((em, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-1.5">
+                        <div><span className="text-slate-400">{idx + 1}.</span> {em}</div>
+                        {customRecipients.includes(em) && (
+                          <button
+                            type="button"
+                            onClick={() => setCustomRecipients(prev => prev.filter(x => x !== em))}
+                            className="text-slate-400 hover:text-rose-600 text-xs font-bold"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
@@ -4890,9 +5162,16 @@ export default function AdminScreen() {
                 </div>
               )}
 
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-[11.5px] font-medium">
-                ⚠️ Email sẽ được gửi trực tiếp từ hộp thư <strong>dkdtvt.hcmus@gmail.com</strong> đến các địa chỉ email trên và thông báo sẽ hiển thị ngay cho các Chi đoàn trên ứng dụng.
-              </div>
+              {isSendingAnnouncement ? (
+                <div className="p-3 bg-blue-50 text-blue-900 rounded-xl border border-blue-200 text-xs flex items-center gap-2">
+                  <RefreshCw size={14} className="animate-spin text-blue-600 shrink-0" />
+                  <span>Đang kết nối Gmail và gửi thông báo... Vui lòng không đóng cửa sổ.</span>
+                </div>
+              ) : (
+                <div className="p-3 bg-blue-50/70 rounded-xl border border-blue-200 text-blue-900 text-[11.5px] font-medium">
+                  ℹ️ Email sẽ được gửi trực tiếp từ hộp thư Đoàn khoa đến các địa chỉ trên, đồng thời cập nhật ngay lên bảng tin thông báo trong ứng dụng.
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 pt-4 mt-4 border-t border-slate-100">
@@ -4900,7 +5179,7 @@ export default function AdminScreen() {
                 type="button"
                 disabled={isSendingAnnouncement}
                 onClick={() => setShowSendConfirmModal(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
               >
                 Hủy bỏ
               </button>
@@ -4913,7 +5192,7 @@ export default function AdminScreen() {
                 {isSendingAnnouncement ? (
                   <>
                     <RefreshCw size={13} className="animate-spin" />
-                    Đang gửi hàng loạt...
+                    Đang gửi ngay...
                   </>
                 ) : (
                   <>

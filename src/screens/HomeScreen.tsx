@@ -1,8 +1,11 @@
-import { Bell, LogOut, CalendarCheck2, KeyRound, X, CheckCircle2, Camera, Upload } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { 
+  Bell, LogOut, CalendarCheck2, KeyRound, X, CheckCircle2, Camera, Upload,
+  Megaphone, FileText, ChevronDown, ChevronUp, Maximize2, Paperclip, Trash2
+} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db, auth, isQuotaExceededError } from '../lib/firebase';
-import { collection, query, getDocs, doc, setDoc, orderBy, getDoc } from 'firebase/firestore';
+import { collection, query, getDocs, doc, setDoc, orderBy, getDoc, deleteDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
 import { isTermExpired, formatDateToDDMMYYYY } from '../utils/termUtils';
 
@@ -41,12 +44,18 @@ interface Notification {
   title: string;
   message: string;
   createdAt: number;
+  sentBy?: string;
+  targetAudience?: string;
+  hasPdf?: boolean;
+  attachmentsCount?: number;
 }
 
 export default function HomeScreen() {
   const [campaigns, setCampaigns] = useState<Activity[]>([]);
   const [activityTab, setActivityTab] = useState<'ongoing' | 'attended'>('ongoing');
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [expandedNotifIds, setExpandedNotifIds] = useState<Record<string, boolean>>({});
+  const [selectedNotifDetail, setSelectedNotifDetail] = useState<Notification | null>(null);
   const [dismissedNotifs, setDismissedNotifs] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('dismissedNotifs');
@@ -55,6 +64,21 @@ export default function HomeScreen() {
       return [];
     }
   });
+
+  const toggleExpandNotif = (id: string) => {
+    setExpandedNotifIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const dismissSingleNotif = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setDismissedNotifs(prev => {
+      const updated = Array.from(new Set([...prev, id]));
+      try {
+        localStorage.setItem('dismissedNotifs', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
 
   const markAllAsRead = () => {
     setDismissedNotifs(prev => {
@@ -79,6 +103,7 @@ export default function HomeScreen() {
   const { logout, currentUser, updateUserAvatar } = useAuth();
   
   const isDoanKhoaAccount = currentUser?.role === 'admin';
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('');
   
   // Filter BCH Đoàn khoa and BCH Chi đoàn (excluding expired terms/periods)
   const bchDoanKhoa = bchMembers.filter(m => {
@@ -92,9 +117,17 @@ export default function HomeScreen() {
     return true;
   });
 
-  const bchChiDoan = !isDoanKhoaAccount && currentUser?.branch
+  const availableBranches = Array.from(new Set(
+    bchMembers.map(m => (m.branch || '').trim()).filter(b => b && b.toLowerCase() !== 'đoàn khoa đtvt')
+  )).sort();
+
+  const activeBranchTarget = isDoanKhoaAccount
+    ? (selectedBranchFilter || availableBranches[0] || '')
+    : (currentUser?.branch || '');
+
+  const bchChiDoan = activeBranchTarget
     ? bchMembers.filter(m => {
-        const isUserBranch = (m.branch || '').toLowerCase() === (currentUser.branch || '').toLowerCase();
+        const isUserBranch = (m.branch || '').toLowerCase() === activeBranchTarget.toLowerCase();
         if (!isUserBranch) return false;
         if (isTermExpired(m.branchTerm)) return false;
 
@@ -122,7 +155,49 @@ export default function HomeScreen() {
     fetchBchMembers();
     fetchActivities();
     fetchNotifications();
-  }, [currentUser]);
+
+    const onBchUpdated = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setBchMembers(e.detail);
+      } else {
+        fetchBchMembers();
+      }
+    };
+    const onNotifDeleted = (e: any) => {
+      const deletedId = e?.detail?.id;
+      if (deletedId) {
+        setNotifications(prev => prev.filter(n => n.id !== deletedId));
+        if (selectedNotifDetail?.id === deletedId) setSelectedNotifDetail(null);
+      }
+    };
+    window.addEventListener('bch_updated', onBchUpdated);
+    window.addEventListener('notification_deleted', onNotifDeleted);
+    return () => {
+      window.removeEventListener('bch_updated', onBchUpdated);
+      window.removeEventListener('notification_deleted', onNotifDeleted);
+    };
+  }, [currentUser?.uid, selectedNotifDetail?.id]);
+
+  const handleDeleteNotification = async (id: string, title: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn thông báo "${title}"? Thông báo này sẽ bị gỡ khỏi toàn bộ hệ thống.`)) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, 'notifications', id));
+      setNotifications(prev => prev.filter(n => n.id !== id));
+      if (selectedNotifDetail?.id === id) {
+        setSelectedNotifDetail(null);
+      }
+      try {
+        window.dispatchEvent(new CustomEvent('notification_deleted', { detail: { id } }));
+      } catch {}
+      alert("Đã xóa thông báo thành công!");
+    } catch (err: any) {
+      console.error("Lỗi khi xóa thông báo:", err);
+      alert("Không thể xóa thông báo: " + (err?.message || "Lỗi mạng hoặc phân quyền"));
+    }
+  };
 
   const fetchBchMembers = async () => {
     try {
@@ -130,7 +205,7 @@ export default function HomeScreen() {
       const cacheDocRef = doc(db, 'system', 'bch_cache');
       try {
         const cacheSnap = await getDoc(cacheDocRef);
-        if (cacheSnap.exists() && Array.isArray(cacheSnap.data().members) && cacheSnap.data().members.length > 0) {
+        if (cacheSnap.exists() && Array.isArray(cacheSnap.data().members)) {
           const cachedList = cacheSnap.data().members;
           setBchMembers(cachedList);
           setQuotaExceeded(false);
@@ -172,15 +247,18 @@ export default function HomeScreen() {
           });
         } else {
           const existing = userMap.get(key);
+          const preferU = (u.updatedAt || 0) >= (existing.updatedAt || 0);
           userMap.set(key, {
             ...existing,
             ...u,
-            name: u.name || existing.name,
+            name: preferU ? (u.name || existing.name) : (existing.name || u.name),
             avatar: u.avatar || u.photoURL || existing.avatar || (u.id === currentUser?.uid ? currentUser?.avatar : ''),
-            committeeRole: u.committeeRole || existing.committeeRole || '',
-            branchRole: u.branchRole || existing.branchRole || '',
-            committeeTerm: u.committeeTerm || existing.committeeTerm,
-            branch: u.branch || existing.branch || 'Đoàn khoa ĐTVT',
+            committeeRole: preferU ? (u.committeeRole ?? existing.committeeRole ?? '') : (existing.committeeRole ?? u.committeeRole ?? ''),
+            branchRole: preferU ? (u.branchRole ?? existing.branchRole ?? '') : (existing.branchRole ?? u.branchRole ?? ''),
+            committeeTerm: preferU ? (u.committeeTerm || existing.committeeTerm) : (existing.committeeTerm || u.committeeTerm),
+            committeePeriod: preferU ? (u.committeePeriod || existing.committeePeriod) : (existing.committeePeriod || u.committeePeriod),
+            branchTerm: preferU ? (u.branchTerm || existing.branchTerm) : (existing.branchTerm || u.branchTerm),
+            branch: preferU ? (u.branch || existing.branch || 'Đoàn khoa ĐTVT') : (existing.branch || u.branch || 'Đoàn khoa ĐTVT'),
           });
         }
       }
@@ -197,8 +275,8 @@ export default function HomeScreen() {
             ...ex,
             avatar: currentUser.avatar || ex.avatar,
             name: currentUser.name || ex.name,
-            committeeRole: currentUser.committeeRole || ex.committeeRole || '',
-            branchRole: currentUser.branchRole || ex.branchRole || '',
+            committeeRole: currentUser.committeeRole !== undefined ? currentUser.committeeRole : (ex.committeeRole || ''),
+            branchRole: currentUser.branchRole !== undefined ? currentUser.branchRole : (ex.branchRole || ''),
           });
         }
       }
@@ -534,21 +612,87 @@ export default function HomeScreen() {
           )}
           {notifications.filter(n => !dismissedNotifs.includes(n.id)).length > 0 && (
             <div className="mb-4">
-              <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">Thông báo mới</h3>
-              <div className="space-y-2">
-                {notifications.filter(n => !dismissedNotifs.includes(n.id)).slice(0, 2).map(n => (
-                  <div key={n.id} className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl border-l-4 border-l-yellow-400 relative">
-                    <div className="text-[11px] font-bold text-yellow-800 pr-4">{n.title}</div>
-                    <div className="text-[10px] text-yellow-700 mt-0.5">{n.message}</div>
-                  </div>
-                ))}
-              </div>
-              {notifications.filter(n => !dismissedNotifs.includes(n.id)).length > 2 && (
-                <button 
-                  onClick={() => setShowNotificationModal(true)}
-                  className="mt-3 w-full block text-center py-2 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 text-[10px] font-bold rounded-lg border border-yellow-200 uppercase"
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1.5 tracking-wider">
+                  <Megaphone size={14} className="text-blue-600" /> Thông báo từ Ban Chấp hành
+                </h3>
+                <button
+                  type="button"
+                  onClick={markAllAsRead}
+                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                 >
-                  +{notifications.filter(n => !dismissedNotifs.includes(n.id)).length - 2} thông báo mới
+                  Đánh dấu tất cả đã đọc
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                {notifications.filter(n => !dismissedNotifs.includes(n.id)).slice(0, 4).map(n => {
+                  const isFwd = (n.title || '').includes('CHUYỂN TIẾP') || (n.message || '').includes('THÔNG TIN GỐC TỪ ĐOÀN TRƯỜNG');
+
+                  return (
+                    <div 
+                      key={n.id} 
+                      onClick={() => setSelectedNotifDetail(n)}
+                      className="bg-white border border-blue-200/90 hover:border-blue-500 rounded-xl p-3 shadow-2xs hover:shadow-xs transition-all border-l-4 border-l-[#1d4ed8] cursor-pointer group"
+                    >
+                      {/* Header badges & actions */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                            <Megaphone size={11} /> {isFwd ? 'CHUYỂN TIẾP ĐOÀN TRƯỜNG' : 'THÔNG BÁO ĐOÀN KHOA'}
+                          </span>
+                          {n.hasPdf && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <FileText size={11} /> Có đính kèm PDF
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400 font-medium">
+                            {new Date(n.createdAt).toLocaleDateString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isDoanKhoaAccount && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteNotification(n.id, n.title, e)}
+                              className="text-slate-400 hover:text-rose-600 p-1 hover:bg-rose-50 rounded-full transition cursor-pointer"
+                              title="Xóa vĩnh viễn thông báo này"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                          <button 
+                            type="button"
+                            onClick={(e) => dismissSingleNotif(n.id, e)}
+                            className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-full transition cursor-pointer"
+                            title="Đã xem / Ẩn thông báo này"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Title only */}
+                      <div className="flex items-center justify-between gap-2 mt-2">
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-[#1d4ed8] transition leading-snug">
+                          {n.title}
+                        </h4>
+                        <span className="text-[11px] font-semibold text-blue-600 shrink-0 flex items-center gap-0.5 opacity-80 group-hover:opacity-100 group-hover:underline">
+                          Xem chi tiết <Maximize2 size={11} />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {notifications.filter(n => !dismissedNotifs.includes(n.id)).length > 3 && (
+                <button 
+                  type="button"
+                  onClick={() => setShowNotificationModal(true)}
+                  className="mt-3 w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl border border-blue-200 uppercase transition cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Bell size={13} /> Xem thêm {notifications.filter(n => !dismissedNotifs.includes(n.id)).length - 3} thông báo khác
                 </button>
               )}
             </div>
@@ -560,15 +704,29 @@ export default function HomeScreen() {
           {renderBchSection(bchDoanKhoa, 'blue')}
         </div>
 
-        {/* BCH Chi Đoàn Section (Chỉ hiển thị cho Đoàn viên/Chi đoàn, không áp dụng cho Đoàn khoa) */}
-        {!isDoanKhoaAccount && (
-          <div>
-            <h3 className="text-xs font-bold text-slate-400 uppercase mb-2">
-              Ban Chấp hành {currentUser?.branch || 'Chi đoàn'}
+        {/* BCH Chi Đoàn Section */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-bold text-slate-400 uppercase">
+              Ban Chấp hành {isDoanKhoaAccount ? (activeBranchTarget || 'Chi đoàn') : (currentUser?.branch || 'Chi đoàn')}
             </h3>
-            {renderBchSection(bchChiDoan, 'emerald')}
+            {isDoanKhoaAccount && availableBranches.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">Chi đoàn:</span>
+                <select
+                  value={activeBranchTarget}
+                  onChange={(e) => setSelectedBranchFilter(e.target.value)}
+                  className="text-[11px] font-bold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-lg focus:outline-none focus:border-blue-500 shadow-2xs"
+                >
+                  {availableBranches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
-        )}
+          {renderBchSection(bchChiDoan, 'emerald')}
+        </div>
 
         {/* Activity Section */}
         <div>
@@ -766,29 +924,178 @@ export default function HomeScreen() {
       )}
 
       {showNotificationModal && (
-        <div className="absolute inset-0 bg-black/60 z-50 flex flex-col items-center pt-20 pb-4 px-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[80vh]">
-            <div className="flex justify-between items-center p-4 border-b border-slate-100">
-              <h3 className="font-bold text-slate-800">Tất cả thông báo</h3>
-              <button onClick={() => { setShowNotificationModal(false); markAllAsRead(); }} className="p-1 hover:bg-slate-100 rounded-full text-slate-500">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl flex flex-col max-h-[85vh] border border-slate-200 overflow-hidden">
+            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Megaphone size={18} className="text-[#1d4ed8]" />
+                <h3 className="font-bold text-slate-800 text-sm sm:text-base">Tất cả thông báo ({notifications.length})</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  type="button" 
+                  onClick={markAllAsRead} 
+                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold hover:underline"
+                >
+                  Đánh dấu đã đọc
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setShowNotificationModal(false)} 
+                  className="p-1 hover:bg-slate-200 rounded-full text-slate-500 cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+              {notifications.length === 0 ? (
+                <p className="text-center text-slate-400 text-xs italic py-8">Không có thông báo nào.</p>
+              ) : (
+                notifications.map(n => {
+                  const isUnread = !dismissedNotifs.includes(n.id);
+                  const isFwd = (n.title || '').includes('CHUYỂN TIẾP') || (n.message || '').includes('THÔNG TIN GỐC TỪ ĐOÀN TRƯỜNG');
+
+                  return (
+                    <div 
+                      key={n.id} 
+                      className={`p-4 rounded-xl border transition-all ${
+                        isUnread ? 'bg-white border-blue-200 shadow-xs border-l-4 border-l-[#1d4ed8]' : 'bg-slate-50/80 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                            {isFwd ? 'CHUYỂN TIẾP' : 'ĐOÀN KHOA'}
+                          </span>
+                          {n.hasPdf && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1">
+                              <FileText size={10} /> PDF
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(n.createdAt).toLocaleDateString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })}
+                          </span>
+                        </div>
+                        {isUnread && (
+                          <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-1" title="Chưa đọc" />
+                        )}
+                      </div>
+
+                      <h4 
+                        onClick={() => setSelectedNotifDetail(n)} 
+                        className="text-xs sm:text-sm font-bold text-slate-800 mt-2 mb-1 cursor-pointer hover:text-blue-600 leading-snug"
+                      >
+                        {n.title}
+                      </h4>
+
+                      <div className="text-xs text-slate-600 whitespace-pre-line line-clamp-3 leading-relaxed mt-1 font-normal">
+                        {n.message}
+                      </div>
+
+                      <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400">
+                          {n.sentBy ? `Gửi bởi: ${n.sentBy}` : 'BCH Đoàn khoa'}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {isDoanKhoaAccount && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteNotification(n.id, n.title)}
+                              className="text-[11px] font-bold text-rose-600 hover:text-rose-800 hover:underline flex items-center gap-1 cursor-pointer"
+                              title="Xóa thông báo"
+                            >
+                              <Trash2 size={12} /> Xóa
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedNotifDetail(n)}
+                            className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <Maximize2 size={11} /> Mở đọc chi tiết
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedNotifDetail && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[88vh] border border-slate-200 overflow-hidden">
+            {/* Header */}
+            <div className="flex justify-between items-start p-4 sm:p-5 border-b border-slate-100 bg-slate-50/90">
+              <div className="pr-4">
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                    <Megaphone size={11} /> Thông báo chính thức
+                  </span>
+                  {selectedNotifDetail.hasPdf && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
+                      <FileText size={11} /> Có file PDF đính kèm
+                    </span>
+                  )}
+                  <span className="text-xs text-slate-500 font-medium">
+                    {new Date(selectedNotifDetail.createdAt).toLocaleString('vi-VN')}
+                  </span>
+                </div>
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">
+                  {selectedNotifDetail.title}
+                </h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setSelectedNotifDetail(null)} 
+                className="p-1.5 hover:bg-slate-200 text-slate-500 rounded-full transition shrink-0 cursor-pointer"
+              >
                 <X size={20} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
-              {notifications.length === 0 ? (
-                <p className="text-center text-slate-500 text-xs italic py-8">Không có thông báo nào.</p>
-              ) : (
-                notifications.map(n => (
-                  <div key={n.id} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm relative">
-                    {!dismissedNotifs.includes(n.id) && (
-                      <span className="absolute top-3 right-3 w-2 h-2 bg-red-500 rounded-full"></span>
-                    )}
-                    <div className="text-[11px] font-bold text-slate-800 pr-4">{n.title}</div>
-                    <div className="text-[10px] text-slate-600 mt-1">{n.message}</div>
-                    <div className="text-[8px] text-slate-400 mt-2">{new Date(n.createdAt).toLocaleString('vi-VN')}</div>
-                  </div>
-                ))
-              )}
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50">
+              <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-xs text-xs sm:text-sm text-slate-800 whitespace-pre-line leading-relaxed font-sans select-text">
+                {selectedNotifDetail.message}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 sm:p-4 border-t border-slate-100 bg-white flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissSingleNotif(selectedNotifDetail.id);
+                    setSelectedNotifDetail(null);
+                  }}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Đánh dấu đã đọc
+                </button>
+                {isDoanKhoaAccount && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteNotification(selectedNotifDetail.id, selectedNotifDetail.title)}
+                    className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 size={13} /> Xóa thông báo này
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedNotifDetail(null)}
+                className="px-5 py-2 bg-[#1d4ed8] hover:bg-blue-800 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-xs"
+              >
+                Đóng
+              </button>
             </div>
           </div>
         </div>

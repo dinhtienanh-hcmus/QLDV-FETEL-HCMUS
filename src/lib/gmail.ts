@@ -233,18 +233,25 @@ export async function fetchAttachmentContent(
 }
 
 /**
- * Helper to encode UTF-8 string to Base64 safely in chunks
+ * Helper to encode Uint8Array into binary string in fast chunks without intermediate Array.from
+ */
+function bytesToBinaryString(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.length;
+  const CHUNK = 8192;
+  for (let i = 0; i < len; i += CHUNK) {
+    const end = Math.min(i + CHUNK, len);
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, end) as unknown as number[]);
+  }
+  return binary;
+}
+
+/**
+ * Helper to encode UTF-8 string to Base64 safely and quickly
  */
 function utf8ToBase64(str: string): string {
   const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  const len = bytes.byteLength;
-  const chunkSize = 16384;
-  for (let i = 0; i < len; i += chunkSize) {
-    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
-    binary += String.fromCharCode(...Array.from(chunk));
-  }
-  return btoa(binary);
+  return btoa(bytesToBinaryString(bytes));
 }
 
 /**
@@ -252,113 +259,176 @@ function utf8ToBase64(str: string): string {
  */
 function stringToBase64Url(str: string): string {
   const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  const len = bytes.byteLength;
-  const chunkSize = 16384;
-  for (let i = 0; i < len; i += chunkSize) {
-    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
-    binary += String.fromCharCode(...Array.from(chunk));
-  }
-  return btoa(binary)
+  return btoa(bytesToBinaryString(bytes))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 }
 
 /**
- * Sends a bulk notification email with optional attachments to multiple recipients via Gmail API
+ * Sends a notification email with optional attachments to multiple recipients via Gmail API
+ * Uses single broadcast MIME message so all recipients receive the email instantly in 1 request
  */
 export async function sendBulkNotificationEmail(
   token: string,
   options: {
     fromEmail: string;
     fromName?: string;
+    replyToEmail?: string;
     recipients: string[];
     subject: string;
     bodyText: string;
     attachments?: Array<{ filename: string; mimeType: string; dataBase64: string }>;
   }
 ): Promise<{ successCount: number; failedRecipients: string[]; errors: string[] }> {
-  const { fromEmail, fromName = 'BCH Đoàn khoa Điện tử - Viễn thông', recipients, subject, bodyText, attachments = [] } = options;
+  const { 
+    fromEmail, 
+    fromName = 'BCH Đoàn khoa Điện tử - Viễn thông', 
+    replyToEmail = 'dkdtvt.hcmus@gmail.com', 
+    recipients, 
+    subject, 
+    bodyText, 
+    attachments = [] 
+  } = options;
 
-  const validRecipients = recipients
-    .map(r => r.trim())
-    .filter(r => r.length > 0 && r.includes('@'));
+  const validRecipients = Array.from(
+    new Set(
+      recipients
+        .map(r => r.trim())
+        .filter(r => r.length > 0 && r.includes('@'))
+    )
+  );
 
   if (validRecipients.length === 0) {
-    throw new Error('Không có địa chỉ email người nhận hợp lệ.');
+    throw new Error('Không có địa chỉ email người nhận hợp lệ. Vui lòng thêm ít nhất 1 email nhận thông báo.');
   }
-
-  let successCount = 0;
-  const failedRecipients: string[] = [];
-  const errors: string[] = [];
 
   const boundary = `====_FETEL_NOTIFICATION_${Date.now()}_====`;
   const subjectEncoded = `=?UTF-8?B?${utf8ToBase64(subject)}?=`;
   const fromHeader = `=?UTF-8?B?${utf8ToBase64(fromName)}?= <${fromEmail}>`;
+  const replyToHeader = `=?UTF-8?B?${utf8ToBase64(fromName)}?= <${replyToEmail}>`;
 
-  // Process sending per recipient so each Chi đoàn receives an individual professional email
-  for (const recipient of validRecipients) {
-    try {
-      const emailLines: string[] = [];
-      emailLines.push(`From: ${fromHeader}`);
-      emailLines.push(`To: ${recipient}`);
-      emailLines.push(`Subject: ${subjectEncoded}`);
-      emailLines.push('MIME-Version: 1.0');
+  // Build the email body once
+  const bodyPartLines: string[] = [];
+  if (attachments.length > 0) {
+    bodyPartLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+    bodyPartLines.push('');
+    bodyPartLines.push(`--${boundary}`);
+    bodyPartLines.push('Content-Type: text/plain; charset="UTF-8"');
+    bodyPartLines.push('Content-Transfer-Encoding: base64');
+    bodyPartLines.push('');
+    bodyPartLines.push(utf8ToBase64(bodyText));
+    bodyPartLines.push('');
 
-      if (attachments.length > 0) {
-        emailLines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
-        emailLines.push('');
-        emailLines.push(`--${boundary}`);
-        emailLines.push('Content-Type: text/plain; charset="UTF-8"');
-        emailLines.push('Content-Transfer-Encoding: base64');
-        emailLines.push('');
-        emailLines.push(utf8ToBase64(bodyText));
-        emailLines.push('');
-
-        for (const att of attachments) {
-          const encodedFilename = `=?UTF-8?B?${utf8ToBase64(att.filename)}?=`;
-          emailLines.push(`--${boundary}`);
-          emailLines.push(`Content-Type: ${att.mimeType || 'application/pdf'}; name="${encodedFilename}"`);
-          emailLines.push('Content-Transfer-Encoding: base64');
-          emailLines.push(`Content-Disposition: attachment; filename="${encodedFilename}"`);
-          emailLines.push('');
-          emailLines.push(att.dataBase64);
-          emailLines.push('');
-        }
-
-        emailLines.push(`--${boundary}--`);
-      } else {
-        emailLines.push('Content-Type: text/plain; charset="UTF-8"');
-        emailLines.push('Content-Transfer-Encoding: base64');
-        emailLines.push('');
-        emailLines.push(utf8ToBase64(bodyText));
-      }
-
-      const rawEmail = emailLines.join('\r\n');
-      const base64UrlRaw = stringToBase64Url(rawEmail);
-
-      const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ raw: base64UrlRaw })
-      });
-
-      if (!sendRes.ok) {
-        const errDetail = await sendRes.text();
-        failedRecipients.push(recipient);
-        errors.push(`${recipient}: ${errDetail}`);
-      } else {
-        successCount++;
-      }
-    } catch (e: any) {
-      failedRecipients.push(recipient);
-      errors.push(`${recipient}: ${e.message || String(e)}`);
+    for (const att of attachments) {
+      const encodedFilename = `=?UTF-8?B?${utf8ToBase64(att.filename)}?=`;
+      bodyPartLines.push(`--${boundary}`);
+      bodyPartLines.push(`Content-Type: ${att.mimeType || 'application/pdf'}; name="${encodedFilename}"`);
+      bodyPartLines.push('Content-Transfer-Encoding: base64');
+      bodyPartLines.push(`Content-Disposition: attachment; filename="${encodedFilename}"`);
+      bodyPartLines.push('');
+      // Clean up base64 data: strip data URL prefix and whitespace
+      const cleanBase64 = (att.dataBase64 || '').replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+      bodyPartLines.push(cleanBase64);
+      bodyPartLines.push('');
     }
+
+    bodyPartLines.push(`--${boundary}--`);
+  } else {
+    bodyPartLines.push('Content-Type: text/plain; charset="UTF-8"');
+    bodyPartLines.push('Content-Transfer-Encoding: base64');
+    bodyPartLines.push('');
+    bodyPartLines.push(utf8ToBase64(bodyText));
   }
 
-  return { successCount, failedRecipients, errors };
+  const commonBodyContent = bodyPartLines.join('\r\n');
+
+  // Attempt Broadcast send (all recipients in To) in 1 fast call
+  try {
+    const emailLines: string[] = [];
+    emailLines.push(`From: ${fromHeader}`);
+    emailLines.push(`Reply-To: ${replyToHeader}`);
+    emailLines.push(`To: ${validRecipients.join(', ')}`);
+    emailLines.push(`Subject: ${subjectEncoded}`);
+    emailLines.push('MIME-Version: 1.0');
+    emailLines.push(commonBodyContent);
+
+    const rawEmail = emailLines.join('\r\n');
+    const base64UrlRaw = stringToBase64Url(rawEmail);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+    const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ raw: base64UrlRaw }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!sendRes.ok) {
+      const errDetail = await sendRes.text();
+      let parsedErr = errDetail;
+      try {
+        const jsonErr = JSON.parse(errDetail);
+        parsedErr = jsonErr.error?.message || errDetail;
+      } catch {}
+      throw new Error(`Gmail API phản hồi lỗi (${sendRes.status}): ${parsedErr}`);
+    }
+
+    return { successCount: validRecipients.length, failedRecipients: [], errors: [] };
+  } catch (broadcastErr: any) {
+    // If broadcast failed due to recipient header limits, try sending individually with concurrency limit
+    console.warn('Broadcast send failed, falling back to individual delivery:', broadcastErr);
+    
+    let successCount = 0;
+    const failedRecipients: string[] = [];
+    const errors: string[] = [];
+
+    for (const recipient of validRecipients) {
+      try {
+        const indLines: string[] = [];
+        indLines.push(`From: ${fromHeader}`);
+        indLines.push(`Reply-To: ${replyToHeader}`);
+        indLines.push(`To: ${recipient}`);
+        indLines.push(`Subject: ${subjectEncoded}`);
+        indLines.push('MIME-Version: 1.0');
+        indLines.push(commonBodyContent);
+
+        const indRaw = indLines.join('\r\n');
+        const indBase64Url = stringToBase64Url(indRaw);
+
+        const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ raw: indBase64Url })
+        });
+
+        if (res.ok) {
+          successCount++;
+        } else {
+          const detail = await res.text();
+          failedRecipients.push(recipient);
+          errors.push(`${recipient}: ${detail}`);
+        }
+      } catch (indErr: any) {
+        failedRecipients.push(recipient);
+        errors.push(`${recipient}: ${indErr?.message || String(indErr)}`);
+      }
+    }
+
+    if (successCount === 0 && errors.length > 0) {
+      throw new Error(broadcastErr?.message || errors[0]);
+    }
+
+    return { successCount, failedRecipients, errors };
+  }
 }
