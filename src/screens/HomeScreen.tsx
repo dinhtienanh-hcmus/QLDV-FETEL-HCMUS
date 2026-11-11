@@ -7,7 +7,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { db, auth, isQuotaExceededError } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, orderBy, getDoc, deleteDoc } from 'firebase/firestore';
 import { updatePassword } from 'firebase/auth';
-import { isTermExpired, formatDateToDDMMYYYY } from '../utils/termUtils';
+import { isTermExpired, formatDateToDDMMYYYY, CANONICAL_BRANCHES, normalizeCanonicalBranch } from '../utils/termUtils';
 import { compressImage } from '../utils/imageCompressor';
 
 interface Organizer {
@@ -120,9 +120,8 @@ export default function HomeScreen() {
 
   const availableBranches = Array.from(new Set(
     bchMembers
-      .map(m => (m.branch || '').trim())
-      .map(b => b === '25ICD1' ? '25ICD' : (b === '26ICD1' ? '26ICD' : b))
-      .filter(b => b && b.toLowerCase() !== 'đoàn khoa đtvt' && b.toLowerCase() !== '25icd1' && b.toLowerCase() !== '26icd1' && !/^(chi\s*đoàn\s*)?(24|2024)/i.test(b))
+      .map(m => normalizeCanonicalBranch(m.branch))
+      .filter(b => b && CANONICAL_BRANCHES.includes(b))
   )).sort();
 
   const activeBranchTarget = isDoanKhoaAccount
@@ -601,16 +600,6 @@ export default function HomeScreen() {
       </div>
 
         <div className="flex-1 p-4 space-y-4 overflow-y-auto no-scrollbar pb-10">
-          {quotaExceeded && (
-            <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 text-amber-900 shadow-xs">
-              <div className="text-xs font-extrabold flex items-center gap-1.5 text-amber-800">
-                <span>⏳</span> Dữ liệu của bạn vẫn an toàn 100% — Đang chờ Google reset hạn mức đọc trong ngày
-              </div>
-              <p className="text-[11px] text-amber-800/90 mt-1 leading-relaxed">
-                Toàn bộ dữ liệu (Đoàn viên, Chi đoàn, Hoạt động, BCH) vẫn còn nguyên trên máy chủ Firestore, <strong>không bị xóa hay mất dữ liệu</strong>. Do hạn mức đọc miễn phí hằng ngày của Google Firebase tính theo múi giờ Thái Bình Dương (00:00 PT), hệ thống sẽ tự động mở lại lượt đọc vào lúc <strong>14:00 chiều nay (giờ Việt Nam)</strong>.
-              </p>
-            </div>
-          )}
           {notifications.filter(n => !dismissedNotifs.includes(n.id)).length > 0 && (
             <div className="mb-4">
               <div className="flex items-center justify-between mb-2">

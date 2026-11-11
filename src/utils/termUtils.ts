@@ -30,3 +30,45 @@ export const formatDateToDDMMYYYY = (timeValue: any): string => {
   const year = d.getFullYear();
   return `${date}/${month}/${year}`;
 };
+
+export const CANONICAL_BRANCHES = [
+  '25DTV_DKD',
+  '25DTV1',
+  '25DTV2',
+  '25ICD',
+  '26DTV_DKD',
+  '26DTV1',
+  '26DTV2',
+  '26ICD'
+];
+
+export const normalizeCanonicalBranch = (raw?: string | null): string => {
+  if (!raw) return '';
+  let s = String(raw).trim();
+  if (!s) return '';
+
+  // Remove common prefixes: "chi đoàn", "bch chi đoàn", "bch", "đoàn khoa", etc.
+  s = s.replace(/^(BCH\s*CHI\s*ĐOÀN|BCH\s*CHI\s*DOAN|CHI\s*ĐOÀN|CHI\s*DOAN|BCH|BAN\s*CHẤP\s*HÀNH|BAN\s*CHAP\s*HANH)\s*/i, '').trim();
+  s = s.replace(/^[._\s-]+|[._\s-]+$/g, '').trim();
+
+  const upper = s.toUpperCase();
+  // ICD variants
+  if (upper === 'ICD25' || upper === '25ICD1' || upper === '25-ICD' || upper === '25ICD') return '25ICD';
+  if (upper === 'ICD26' || upper === '26ICD1' || upper === '26-ICD' || upper === '26ICD') return '26ICD';
+
+  // DTV DKD variants
+  if (upper === '25DTVDKD' || upper === '25DTV-DKD' || upper === '25DTV_DKD') return '25DTV_DKD';
+  if (upper === '26DTVDKD' || upper === '26DTV-DKD' || upper === '26DTV_DKD') return '26DTV_DKD';
+
+  // 25DTV1, 25DTV2, etc.
+  if (upper.includes('25DTV1') || upper === '25DTV1') return '25DTV1';
+  if (upper.includes('25DTV2') || upper === '25DTV2') return '25DTV2';
+  if (upper.includes('26DTV1') || upper === '26DTV1') return '26DTV1';
+  if (upper.includes('26DTV2') || upper === '26DTV2') return '26DTV2';
+
+  const canonicalMatch = CANONICAL_BRANCHES.find(cb => cb.toLowerCase() === upper.toLowerCase());
+  if (canonicalMatch) return canonicalMatch;
+
+  return s;
+};
+

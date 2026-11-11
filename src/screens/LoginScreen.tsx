@@ -9,16 +9,14 @@ import {
 import { collection, query, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { Lock, AlertCircle, User as UserIcon, LogIn, Users } from 'lucide-react';
+import { CANONICAL_BRANCHES, normalizeCanonicalBranch } from '../utils/termUtils';
 
-const DEFAULT_BRANCHES = [
-  '25ICD', '25DTV1', '25DTV2', '25DTV_DKD',
-  '26ICD', '26DTV1', '26DTV2', '26DTV_DKD'
-];
+const DEFAULT_BRANCHES = CANONICAL_BRANCHES;
 
 export default function LoginScreen() {
   const [activeTab, setActiveTab] = useState<'doanvien' | 'bch'>('doanvien');
   const [loginId, setLoginId] = useState('');
-  const [branchOptions, setBranchOptions] = useState<string[]>(DEFAULT_BRANCHES);
+  const [branchOptions, setBranchOptions] = useState<string[]>(CANONICAL_BRANCHES);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -37,10 +35,10 @@ export default function LoginScreen() {
       try {
         const q = query(collection(db, 'branches'), orderBy('name', 'asc'));
         const snap = await getDocs(q);
-          const fetchedNames = snap.docs.map(d => d.data().name as string);
-          const combined = Array.from(new Set([...fetchedNames, ...DEFAULT_BRANCHES]))
-            .filter(b => b && b !== '25ICD1' && b !== '26ICD1');
-          setBranchOptions(combined);
+        const fetchedNames = snap.docs.map(d => normalizeCanonicalBranch(d.data().name as string));
+        const combined = Array.from(new Set([...fetchedNames, ...CANONICAL_BRANCHES]))
+          .filter(b => b && CANONICAL_BRANCHES.includes(b));
+        setBranchOptions(combined);
       } catch (err) {
         console.error('Error loading branches:', err);
       }

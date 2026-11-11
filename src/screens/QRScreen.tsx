@@ -18,6 +18,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { collection, query, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, isQuotaExceededError } from '../lib/firebase';
+import { CANONICAL_BRANCHES } from '../utils/termUtils';
 import { Html5Qrcode } from 'html5-qrcode';
 import { formatDateToDDMMYYYY } from '../utils/termUtils';
 
@@ -35,10 +36,7 @@ interface ScanFeedback {
   activityName?: string;
 }
 
-const DEFAULT_BRANCHES = [
-  '25ICD', '25DTV1', '25DTV2', '25DTV_DKD',
-  '26ICD', '26DTV1', '26DTV2', '26DTV_DKD'
-];
+const DEFAULT_BRANCHES = CANONICAL_BRANCHES;
 
 export default function QRScreen() {
   const { currentUser, updateUserProfile } = useAuth();

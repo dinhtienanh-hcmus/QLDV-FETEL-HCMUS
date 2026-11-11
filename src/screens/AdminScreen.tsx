@@ -6,11 +6,10 @@ import { PlusCircle, Trash2, Users, FileSpreadsheet, Check, X, Bell, Upload, Lis
 import { initializeApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import Papa from 'papaparse';
-import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY } from '../utils/termUtils';
+import { isTermExpired, filterActiveTerms, DEFAULT_DOAN_KHOA_TERMS, DEFAULT_DOAN_KHOA_PERIODS, DEFAULT_CHI_DOAN_TERMS, formatDateToDDMMYYYY, CANONICAL_BRANCHES, normalizeCanonicalBranch } from '../utils/termUtils';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { getGoogleSheetsAccessToken, hasCachedToken, createTrackingSpreadsheet, syncTrackingSpreadsheet, extractSpreadsheetId } from '../lib/googleSheets';
 import { getGmailAccessToken, getCachedGmailToken, getCachedGmailEmail, hasCachedGmailToken, setCachedGmailToken, fetchRecentEmails, fetchAttachmentContent, sendBulkNotificationEmail, GmailMessageSummary, EmailAttachment } from '../lib/gmail';
-import { matchStudentTo25ICD } from '../data/canonicalRoster';
 import { compressImage } from '../utils/imageCompressor';
 
 const VIETNAMESE_REPAIR_MAP: Record<string, string> = {
@@ -133,8 +132,6 @@ export default function AdminScreen() {
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
   const [searchBch, setSearchBch] = useState('');
   const [userPage, setUserPage] = useState(1);
-  const [isCleaningUsers, setIsCleaningUsers] = useState(false);
-  const [cleanResultMsg, setCleanResultMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const USERS_PER_PAGE = 25;
 
   const filteredUsersList = useMemo(() => {
@@ -205,24 +202,15 @@ export default function AdminScreen() {
   const [editingBranchName, setEditingBranchName] = useState('');
   const [deletingBranch, setDeletingBranch] = useState<{ id: string; name: string } | null>(null);
   const [deletingUser, setDeletingUser] = useState<any | null>(null);
-  const [branchesSeeded, setBranchesSeeded] = useState(false);
   const [myDriveLink, setMyDriveLink] = useState('');
   const [savingDriveLink, setSavingDriveLink] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [driveErrorMsg, setDriveErrorMsg] = useState('');
 
-  const DEFAULT_BRANCHES = [
-    '25ICD', '25DTV1', '25DTV2', '25DTV_DKD',
-    '26ICD', '26DTV1', '26DTV2', '26DTV_DKD'
-  ];
-
   const [handbookTopics, setHandbookTopics] = useState<any[]>([]);
   const [editingTopicId, setEditingTopicId] = useState<string | null>(null);
   const [topicTitle, setTopicTitle] = useState('');
   const [topicContent, setTopicContent] = useState('');
-  
-  const [notificationMsg, setNotificationMsg] = useState('');
-  const [notificationTarget, setNotificationTarget] = useState('all');
 
   const [newUsername, setNewUsername] = useState('');
   const [newRole, setNewRole] = useState('chidoan');
@@ -912,220 +900,56 @@ export default function AdminScreen() {
     }
   };
 
-  const handleCleanKhoa2024 = async () => {
-    try {
-      const snap = await getDocs(collection(db, 'branches'));
-      let count = 0;
-      for (const d of snap.docs) {
-        const name = (d.data().name || '').trim();
-        if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(name)) {
-          await deleteDoc(doc(db, 'branches', d.id));
-          count++;
-        }
-      }
-      await fetchBranches();
-      await handleAutoCleanAndSyncUsers(false);
-    } catch (e: any) {
-      console.error(e);
-      alert("Lỗi khi xóa Chi đoàn khóa 2024: " + (e?.message || "Lỗi mạng"));
-    }
-  };
-
   const fetchBranches = async () => {
     try {
       const q = query(collection(db, 'branches'), orderBy('name', 'asc'));
       const snapshot = await getDocs(q);
-      if (snapshot.empty && !branchesSeeded) {
-        setBranchesSeeded(true);
-        const list = [];
-        for (const bName of DEFAULT_BRANCHES) {
-          const docRef = await addDoc(collection(db, 'branches'), { name: bName, createdAt: Date.now() });
-          list.push({ id: docRef.id, name: bName });
-        }
-        setBranches(list);
-      } else {
-        const rawList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        
-        let migrated = false;
-        const updatedList = [];
-        const seenNames = new Set<string>();
+      const rawList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
 
-        for (const b of rawList) {
-          const cleanName = (b.name || '').trim();
-          
-          // Completely delete any branch belonging to Khóa 2024 (e.g. 24..., 2024..., Chi đoàn 24...)
-          const isKhoa2024 = /^(chi\s*đoàn\s*)?(24|2024)/i.test(cleanName);
-          const isObsoleteIcd1 = cleanName === '25ICD1' || cleanName === '26ICD1' || cleanName.toLowerCase() === 'chi đoàn 25icd1' || cleanName.toLowerCase() === 'chi đoàn 26icd1';
-
-          if (isKhoa2024 || isObsoleteIcd1) {
-            await deleteDoc(doc(db, 'branches', b.id));
-            migrated = true;
-            continue;
-          }
-
-          // Remove duplicate branch entries if any
-          if (seenNames.has(cleanName)) {
-            await deleteDoc(doc(db, 'branches', b.id));
-            continue;
-          }
-          seenNames.add(cleanName);
-          updatedList.push(b);
-        }
-
-        const existingNames = updatedList.map(b => b.name);
-        const missingDefaultBranches = DEFAULT_BRANCHES.filter(name => !existingNames.includes(name));
-        
-        if (missingDefaultBranches.length > 0) {
-          for (const bName of missingDefaultBranches) {
-            const docRef = await addDoc(collection(db, 'branches'), { name: bName, createdAt: Date.now() });
-            updatedList.push({ id: docRef.id, name: bName });
-            migrated = true;
-          }
-        }
-        
-        if (migrated) {
-          const oldNames = ['25ICD1', '26ICD1'];
-          const newNames = ['25ICD', '26ICD'];
-          
-          const usersRef = collection(db, 'users');
-          const usersSnap = await getDocs(usersRef);
-          for (const userDoc of usersSnap.docs) {
-            const userData = userDoc.data();
-            const currentB = (userData.branch || '').trim();
-            const isUserKhoa2024 = /^(chi\s*đoàn\s*)?(24|2024)/i.test(currentB);
-            const idx = oldNames.indexOf(currentB);
-
-            if (isUserKhoa2024) {
-              await updateDoc(doc(db, 'users', userDoc.id), {
-                branch: '',
-                branchRole: null,
-                branchTerm: null,
-                updatedAt: Date.now()
-              });
-            } else if (idx !== -1) {
-              await updateDoc(doc(db, 'users', userDoc.id), {
-                branch: newNames[idx],
-                updatedAt: Date.now()
-              });
-            }
-          }
-          
-          const activitiesRef = collection(db, 'activities');
-          const activitiesSnap = await getDocs(activitiesRef);
-          for (const activityDoc of activitiesSnap.docs) {
-            const actData = activityDoc.data();
-            let needsUpdate = false;
-            const updateFields: any = {};
-            
-            const currentActBranch = (actData.branch || '').trim();
-            const currentActTarget = (actData.targetAudience || '').trim();
-
-            if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(currentActBranch)) {
-              updateFields.branch = '';
-              needsUpdate = true;
-            } else {
-              const branchIdx = oldNames.indexOf(currentActBranch);
-              if (branchIdx !== -1) {
-                updateFields.branch = newNames[branchIdx];
-                needsUpdate = true;
-              }
-            }
-            
-            if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(currentActTarget)) {
-              updateFields.targetAudience = 'all';
-              needsUpdate = true;
-            } else {
-              const targetIdx = oldNames.indexOf(currentActTarget);
-              if (targetIdx !== -1) {
-                updateFields.targetAudience = newNames[targetIdx];
-                needsUpdate = true;
-              }
-            }
-            
-            if (actData.cooperatingBranches && Array.isArray(actData.cooperatingBranches)) {
-              const updatedCooperating = actData.cooperatingBranches
-                .filter((cb: string) => !/^(chi\s*đoàn\s*)?(24|2024)/i.test(cb))
-                .map((cb: string) => {
-                  const idx = oldNames.indexOf(cb);
-                  return idx !== -1 ? newNames[idx] : cb;
-                });
-              if (JSON.stringify(updatedCooperating) !== JSON.stringify(actData.cooperatingBranches)) {
-                updateFields.cooperatingBranches = updatedCooperating;
-                needsUpdate = true;
-              }
-            }
-            
-            if (actData.branches && Array.isArray(actData.branches)) {
-              const updatedBranches = actData.branches
-                .filter((b: string) => !/^(chi\s*đoàn\s*)?(24|2024)/i.test(b))
-                .map((b: string) => {
-                  const idx = oldNames.indexOf(b);
-                  return idx !== -1 ? newNames[idx] : b;
-                });
-              if (JSON.stringify(updatedBranches) !== JSON.stringify(actData.branches)) {
-                updateFields.branches = updatedBranches;
-                needsUpdate = true;
-              }
-            }
-            
-            if (needsUpdate) {
-              updateFields.updatedAt = Date.now();
-              await updateDoc(doc(db, 'activities', activityDoc.id), updateFields);
-            }
-          }
-
-          // Clean up system/bch_cache as well
-          try {
-            const bchCacheSnap = await getDoc(doc(db, 'system', 'bch_cache'));
-            if (bchCacheSnap.exists() && Array.isArray(bchCacheSnap.data().members)) {
-              let cacheChanged = false;
-              const cleanedBch = bchCacheSnap.data().members
-                .filter((m: any) => {
-                  const b = (m.branch || '').trim();
-                  if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(b)) {
-                    if (!m.committeeRole || m.committeeRole.trim() === '') {
-                      cacheChanged = true;
-                      return false;
-                    }
-                  }
-                  return true;
-                })
-                .map((m: any) => {
-                  const b = (m.branch || '').trim();
-                  if (/^(chi\s*đoàn\s*)?(24|2024)/i.test(b)) {
-                    cacheChanged = true;
-                    return { ...m, branch: 'Đoàn khoa ĐTVT', branchRole: null };
-                  }
-                  if (b === '25ICD1') {
-                    cacheChanged = true;
-                    return { ...m, branch: '25ICD' };
-                  }
-                  if (b === '26ICD1') {
-                    cacheChanged = true;
-                    return { ...m, branch: '26ICD' };
-                  }
-                  return m;
-                });
-              if (cacheChanged) {
-                await setDoc(doc(db, 'system', 'bch_cache'), { members: cleanedBch, updatedAt: Date.now() }, { merge: true });
-                try {
-                  localStorage.setItem('cached_bch_members', JSON.stringify(cleanedBch));
-                  window.dispatchEvent(new CustomEvent('bch_updated', { detail: cleanedBch }));
-                } catch {}
-              }
-            }
-          } catch {}
-          
-          fetchUsers();
-          fetchActivities();
-        }
-        
-        updatedList.sort((a, b) => a.name.localeCompare(b.name));
-        setBranches(updatedList);
-        try {
-          localStorage.setItem('cached_admin_branches', JSON.stringify(updatedList));
-        } catch {}
+      const grouped = new Map<string, any[]>();
+      for (const b of rawList) {
+        const cleanName = (b.name || '').trim();
+        if (!cleanName) continue;
+        const key = normalizeCanonicalBranch(cleanName) || cleanName;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key)!.push(b);
       }
+
+      const finalBranchList: any[] = [];
+      for (const [canonicalName, docs] of grouped.entries()) {
+        let primary = docs.find(d => (d.name || '').trim() === canonicalName) || docs[0];
+        const others = docs.filter(d => d.id !== primary.id);
+
+        let bestDriveLink = (primary.activityDriveLink || '').trim();
+        for (const other of others) {
+          const otherLink = (other.activityDriveLink || '').trim();
+          if (otherLink && !bestDriveLink) {
+            bestDriveLink = otherLink;
+          }
+          try {
+            await deleteDoc(doc(db, 'branches', other.id));
+          } catch {}
+        }
+
+        if ((primary.name || '').trim() !== canonicalName || bestDriveLink !== (primary.activityDriveLink || '').trim()) {
+          try {
+            await updateDoc(doc(db, 'branches', primary.id), {
+              name: canonicalName,
+              activityDriveLink: bestDriveLink,
+              updatedAt: Date.now()
+            });
+            primary = { ...primary, name: canonicalName, activityDriveLink: bestDriveLink };
+          } catch {}
+        }
+
+        finalBranchList.push(primary);
+      }
+
+      finalBranchList.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      setBranches(finalBranchList);
+      try {
+        localStorage.setItem('cached_admin_branches', JSON.stringify(finalBranchList));
+      } catch {}
     } catch (err) {
       if (isQuotaExceededError(err)) {
         setQuotaExceeded(true);
@@ -1263,9 +1087,13 @@ export default function AdminScreen() {
 
   const findBranchMatch = (rawBranchName: string) => {
     if (!rawBranchName) return null;
+    const canonical = normalizeCanonicalBranch(rawBranchName);
+    let found = branches.find(b => normalizeCanonicalBranch(b.name) === canonical);
+    if (found) return found;
+
     const clean = rawBranchName.trim();
     // 1. Exact match
-    let found = branches.find(b => (b.name || '').toLowerCase().trim() === clean.toLowerCase());
+    found = branches.find(b => (b.name || '').toLowerCase().trim() === clean.toLowerCase());
     if (found) return found;
 
     // 2. Normalized match stripping "bch", "chi đoàn", spaces, underscores
@@ -1281,7 +1109,8 @@ export default function AdminScreen() {
 
   useEffect(() => {
     if (isBranch && branches.length > 0 && currentUser?.branch) {
-      const mb = findBranchMatch(currentUser.branch);
+      const canonical = normalizeCanonicalBranch(currentUser.branch);
+      const mb = branches.find(b => normalizeCanonicalBranch(b.name) === canonical) || findBranchMatch(currentUser.branch);
       if (mb) {
         setMyDriveLink(mb.activityDriveLink || '');
       }
@@ -1294,9 +1123,11 @@ export default function AdminScreen() {
     setSaveSuccess(false);
     setDriveErrorMsg('');
     try {
-      const mb = findBranchMatch(currentUser.branch);
+      const canonical = normalizeCanonicalBranch(currentUser.branch);
+      const mb = branches.find(b => normalizeCanonicalBranch(b.name) === canonical) || findBranchMatch(currentUser.branch);
       if (mb) {
         await updateDoc(doc(db, 'branches', mb.id), {
+          name: canonical || mb.name,
           activityDriveLink: myDriveLink.trim(),
           updatedAt: Date.now()
         });
@@ -1304,9 +1135,9 @@ export default function AdminScreen() {
         setTimeout(() => setSaveSuccess(false), 4000);
         await fetchBranches();
       } else {
-        const normalizedName = currentUser.branch.replace(/^(bch|chi\s*đoàn)\s*/i, '').trim() || currentUser.branch;
+        const canonicalName = canonical || currentUser.branch.replace(/^(bch|chi\s*đoàn)\s*/i, '').trim();
         await addDoc(collection(db, 'branches'), {
-          name: normalizedName,
+          name: canonicalName,
           activityDriveLink: myDriveLink.trim(),
           createdAt: Date.now(),
           updatedAt: Date.now()
@@ -1334,190 +1165,12 @@ export default function AdminScreen() {
     }
   };
 
-  const handleAutoCleanAndSyncUsers = async (silent = false) => {
-    if (!isAdmin) return;
-    setIsCleaningUsers(true);
-    if (!silent) setCleanResultMsg(null);
-
-    try {
-      const snapshot = await getDocs(collection(db, 'users'));
-      const allDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-
-      let deletedK24Count = 0;
-      let deletedJunkCount = 0;
-      let updatedStudentCount = 0;
-      let deletedDuplicatePlaceholders = 0;
-
-      const placeholdersToDelete = new Set<string>();
-
-      for (const u of allDocs) {
-        const uId = u.id;
-        const uName = String(u.name || '').trim();
-        const uMssv = String(u.mssv || u.username || '').trim();
-        const uBranch = String(u.branch || '').trim();
-        const uEmail = String(u.email || '').toLowerCase().trim();
-        const uRole = u.role || 'doanvien';
-
-        // 1. Identify K24 accounts and placeholders to delete
-        const isK24 = 
-          uId.startsWith('profile_24') ||
-          uMssv.startsWith('24') ||
-          /^(chi\s*đoàn\s*)?24/i.test(uBranch) ||
-          uName.includes('24_') ||
-          /24\d{6}/.test(uName) ||
-          /24\d{6}/.test(uEmail);
-
-        if (isK24) {
-          try {
-            await deleteDoc(doc(db, 'users', uId));
-            deletedK24Count++;
-          } catch (e) {
-            console.warn('Could not delete K24 doc:', uId, e);
-          }
-          continue;
-        }
-
-        // 2. Identify obvious junk / test nicknames
-        const JUNK_EMAILS = ['datsky303@gmail.com', 'rubikkup.247@gmail.com', 'kirito6685@gmail.com'];
-        const isJunkAccount = 
-          JUNK_EMAILS.includes(uEmail) || 
-          (!uName && !uMssv && !uEmail) ||
-          (uRole === 'doanvien' && !uId.startsWith('profile_') && !uMssv && (uName === 'Rubikkup' || uName === 'Đạt Sky' || uName === 'Tân Kỳ'));
-
-        if (isJunkAccount) {
-          try {
-            await deleteDoc(doc(db, 'users', uId));
-            deletedJunkCount++;
-          } catch (e) {
-            console.warn('Could not delete junk doc:', uId, e);
-          }
-          continue;
-        }
-
-        // 3. Fix 25ICD1 duplicate placeholders (e.g. profile_25300036)
-        if (uId.startsWith('profile_253000')) {
-          try {
-            await deleteDoc(doc(db, 'users', uId));
-            deletedDuplicatePlaceholders++;
-          } catch {}
-          continue;
-        }
-
-        // 4. Reconcile active student accounts (role === 'doanvien', signed in via Google)
-        // If student is mislabeled as "Đoàn khoa ĐTVT" or has empty MSSV or distorted name
-        if (!uId.startsWith('profile_') && uRole === 'doanvien' && uEmail !== 'dinhtienanh.hcmus@gmail.com' && uEmail !== 'dkdtvt.hcmus@gmail.com') {
-          const isMislabeledDoanKhoa = uBranch === 'Đoàn khoa ĐTVT' || uBranch === 'Đoàn khoa ĐT-VT' || !uBranch;
-          
-          // Try to match student to 25ICD canonical roster
-          const match = matchStudentTo25ICD(uName, uEmail);
-          if (match) {
-            const updates: any = {
-              name: match.name,
-              mssv: match.mssv,
-              username: match.mssv,
-              branch: '25ICD',
-              updatedAt: Date.now()
-            };
-            if (uEmail.includes('@student.hcmus.edu.vn')) {
-              updates.email = '';
-            }
-            await updateDoc(doc(db, 'users', uId), updates);
-            updatedStudentCount++;
-
-            if (match.profileId) {
-              placeholdersToDelete.add(match.profileId);
-            }
-            placeholdersToDelete.add(`profile_${match.mssv}`);
-          } else if (isMislabeledDoanKhoa) {
-            // Check if matches 26ICD (e.g. Minh Triết)
-            if (uEmail === 'triet6985@gmail.com' || uName.toLowerCase().includes('minh triet')) {
-              await updateDoc(doc(db, 'users', uId), {
-                name: 'Nguyễn Đặng Minh Triết',
-                mssv: '26300078',
-                username: '26300078',
-                branch: '26ICD',
-                updatedAt: Date.now()
-              });
-              updatedStudentCount++;
-            } else if (uEmail === 'dinhtienanh.ltt2006@gmail.com') {
-              // Admin personal alt account
-              await updateDoc(doc(db, 'users', uId), { branch: 'Đoàn khoa ĐT-VT', role: 'admin', updatedAt: Date.now() });
-            } else {
-              // Other regular student: reset branch to empty, never Đoàn khoa ĐTVT
-              await updateDoc(doc(db, 'users', uId), { branch: '', updatedAt: Date.now() });
-            }
-          }
-        }
-      }
-
-      // Delete redundant placeholder profiles that were merged with active user accounts
-      for (const pId of placeholdersToDelete) {
-        try {
-          await deleteDoc(doc(db, 'users', pId));
-          deletedDuplicatePlaceholders++;
-        } catch {}
-      }
-
-      // 5. Clean and sync system/bch_cache
-      try {
-        const freshSnap = await getDocs(collection(db, 'users'));
-        const freshUsers = freshSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-        
-        const cleanBchMembers = freshUsers.filter((u: any) => {
-          const hasCommRole = Boolean(u.committeeRole && String(u.committeeRole).trim() !== '');
-          const hasBrRole = Boolean(u.branchRole && String(u.branchRole).trim() !== '');
-          if (!hasCommRole && !hasBrRole) return false;
-          
-          const b = String(u.branch || '').trim();
-          const m = String(u.mssv || u.username || '').trim();
-          const n = String(u.name || '').trim();
-          if (/^(chi\s*đoàn\s*)?24/i.test(b) || m.startsWith('24') || n.includes('24_') || u.id.startsWith('profile_24')) {
-            return false;
-          }
-          return true;
-        }).map((m: any) => {
-          if (m.branch === '25ICD1') {
-            return { ...m, branch: '25ICD' };
-          }
-          return m;
-        });
-
-        await setDoc(doc(db, 'system', 'bch_cache'), { members: cleanBchMembers, updatedAt: Date.now() }, { merge: true });
-        localStorage.setItem('cached_bch_members', JSON.stringify(cleanBchMembers));
-        window.dispatchEvent(new CustomEvent('bch_updated', { detail: cleanBchMembers }));
-      } catch (e) {
-        console.warn('Could not update bch_cache:', e);
-      }
-
-      const summaryMsg = `Hoàn tất dọn dẹp: Đã xóa ${deletedK24Count} hồ sơ/tài khoản K24, ${deletedJunkCount} tài khoản rác, ${deletedDuplicatePlaceholders} hồ sơ tạm; Đã chuẩn hóa ${updatedStudentCount} tài khoản sinh viên về đúng Chi đoàn 25ICD/26ICD và cập nhật BCH lên Trang chủ.`;
-      setCleanResultMsg({ type: 'success', text: summaryMsg });
-    } catch (err: any) {
-      console.error('Error during auto clean:', err);
-      setCleanResultMsg({ type: 'error', text: 'Có lỗi xảy ra trong quá trình dọn dẹp: ' + (err?.message || 'Lỗi mạng') });
-    } finally {
-      setIsCleaningUsers(false);
-    }
-  };
-
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
       const snapshot = await getDocs(collection(db, 'users'));
       const rawUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
 
-      // Auto-trigger clean & sync if admin is viewing and legacy invalid data is detected
-      if (isAdmin) {
-        const hasLegacyInvalid = rawUsers.some(u => 
-          u.id.startsWith('profile_24') || 
-          (u.mssv && String(u.mssv).startsWith('24')) ||
-          u.id.startsWith('profile_253000') ||
-          (u.role === 'doanvien' && !u.id.startsWith('profile_') && (u.branch === 'Đoàn khoa ĐTVT' || u.branch === 'Đoàn khoa ĐT-VT') && u.email !== 'dinhtienanh.hcmus@gmail.com' && u.email !== 'dkdtvt.hcmus@gmail.com')
-        );
-        if (hasLegacyInvalid && !isCleaningUsers) {
-          handleAutoCleanAndSyncUsers(true).catch(console.error);
-        }
-      }
-      
       // 1. Phân loại tài khoản đã đăng nhập thực tế (dùng Auth UID)
       const activeUserMssvs = new Set<string>();
       const activeUserEmails = new Set<string>();
@@ -1966,23 +1619,6 @@ export default function AdminScreen() {
       case 'CHỦ NHẬT XANH': return 'bg-green-600 text-white';
       case 'TÌNH NGUYỆN': return 'bg-orange-600 text-white';
       default: return 'bg-slate-600 text-white';
-    }
-  };
-
-  const sendNotification = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!notificationMsg || !isAdmin) return;
-    try {
-      await addDoc(collection(db, 'notifications'), {
-        title: 'Thông báo từ Ban Chấp hành Đoàn khoa',
-        message: notificationMsg,
-        targetAudience: notificationTarget,
-        createdAt: Date.now()
-      });
-      setNotificationMsg('');
-      alert("Đã gửi thông báo!");
-    } catch (err) {
-      console.error(err);
     }
   };
 
@@ -2675,17 +2311,6 @@ export default function AdminScreen() {
       </div>
 
       <div className="flex-1 p-4 space-y-4 overflow-y-auto pb-10">
-        {quotaExceeded && (
-          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-amber-900 shadow-xs">
-            <div className="text-xs sm:text-sm font-extrabold flex items-center gap-1.5 text-amber-800">
-              <span>⏳</span> Dữ liệu trên máy chủ KHÔNG bị mất — Hạn mức đọc của Google sẽ reset lúc 14:00 chiều nay (giờ Việt Nam)
-            </div>
-            <p className="text-[11px] sm:text-xs text-amber-800/90 mt-1.5 leading-relaxed">
-              Toàn bộ dữ liệu Đoàn viên (bao gồm lớp 25ICD bạn vừa import), Chi đoàn, Ban Chấp hành và Hoạt động <strong>vẫn còn nguyên vẹn 100% trên Firestore</strong>. Sở dĩ bạn không còn thấy thông báo lỗi đỏ là do ứng dụng đã chặn popup báo lỗi để tránh làm văng trang, nhưng hạn mức đọc miễn phí hằng ngày của Google Firebase được tính theo <strong>00:00 giờ Thái Bình Dương (Pacific Time)</strong> — tức là <strong>14:00 chiều theo giờ Việt Nam</strong> mới được đặt lại (reset). Ngay sau 14:00 chiều nay (hoặc ngay khi nâng cấp gói dữ liệu), toàn bộ danh sách sẽ tự động hiển thị trở lại bình thường!
-            </p>
-          </div>
-        )}
-        
         {isBranch && (
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl shadow-sm border border-blue-200">
             <h3 className="text-sm font-bold text-blue-900 mb-1 flex items-center gap-1.5">
@@ -2728,31 +2353,6 @@ export default function AdminScreen() {
         
         {activeTab === 'activities' && (
           <>
-        {isAdmin && (
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-            <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
-              <Bell size={16} className="mr-1.5 text-blue-600"/> Gửi thông báo
-            </h3>
-            <form onSubmit={sendNotification} className="space-y-2">
-              <textarea 
-                className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none" 
-                placeholder="Nội dung thông báo..." rows={2}
-                value={notificationMsg} onChange={e => setNotificationMsg(e.target.value)} required 
-              />
-              <div className="flex gap-2">
-                <select 
-                  className="flex-1 text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none"
-                  value={notificationTarget} onChange={e => setNotificationTarget(e.target.value)}
-                >
-                  <option value="all">Tất cả Đoàn viên</option>
-                  <option value="chidoan">Tất cả Chi đoàn</option>
-                </select>
-                <button type="submit" className="bg-blue-600 text-white px-4 rounded-lg font-bold text-xs">GỬI</button>
-              </div>
-            </form>
-          </div>
-        )}
-
         <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
           <h3 className="text-sm font-bold text-slate-800 mb-3 flex items-center">
             <PlusCircle size={16} className="mr-1.5 text-blue-600"/>
@@ -3274,16 +2874,6 @@ export default function AdminScreen() {
                 <h3 className="text-sm font-bold text-slate-800 flex items-center">
                   <Users size={16} className="mr-1.5 text-blue-600"/> Danh sách Chi đoàn trực thuộc ({branches.length})
                 </h3>
-                {isAdmin && (
-                  <button 
-                    type="button" 
-                    onClick={handleCleanKhoa2024} 
-                    className="text-xs text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 transition font-bold flex items-center gap-1 cursor-pointer"
-                    title="Xóa toàn bộ các Chi đoàn thuộc khóa 2024 (24DTV, 24ICD...)"
-                  >
-                    <Trash2 size={12} /> Dọn dẹp Chi đoàn khóa 2024
-                  </button>
-                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -3434,36 +3024,6 @@ export default function AdminScreen() {
                      </label>
                   </div>
                 </div>
-
-                {isAdmin && (
-                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-4 rounded-xl shadow-sm border border-amber-200">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <h4 className="text-xs font-bold text-amber-900 flex items-center">
-                          <Sparkles size={15} className="mr-1.5 text-amber-600" />
-                          Dọn dẹp tài khoản không hợp lệ & Chuẩn hóa Chi đoàn
-                        </h4>
-                        <p className="text-[11px] text-amber-700 mt-1">
-                          Tự động xóa tài khoản/hồ sơ K24 và tài khoản rác; tự động phân loại lại các tài khoản cá nhân về đúng Chi đoàn 25ICD, gán đúng MSSV và họ tên; đồng bộ danh sách BCH lên Trang chủ.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleAutoCleanAndSyncUsers(false)}
-                        disabled={isCleaningUsers}
-                        className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shrink-0 flex items-center justify-center transition shadow-sm cursor-pointer"
-                      >
-                        <Sparkles size={14} className={`mr-1.5 ${isCleaningUsers ? 'animate-spin' : ''}`} />
-                        {isCleaningUsers ? 'Đang dọn dẹp...' : 'Dọn dẹp & Chuẩn hóa ngay'}
-                      </button>
-                    </div>
-                    {cleanResultMsg && (
-                      <div className={`mt-2.5 p-2.5 rounded-lg text-xs font-medium ${cleanResultMsg.type === 'success' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-red-100 text-red-800 border border-red-300'}`}>
-                        {cleanResultMsg.text}
-                      </div>
-                    )}
-                  </div>
-                )}
               </>
             )}
 

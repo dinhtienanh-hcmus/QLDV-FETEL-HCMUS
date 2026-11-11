@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User as FirebaseUser, onAuthStateChanged, signOut, updateEmail } from 'firebase/auth';
 import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { auth, db, isQuotaExceededError } from '../lib/firebase';
+import { normalizeCanonicalBranch } from '../utils/termUtils';
 
 interface AppUser extends FirebaseUser {
   role?: 'admin' | 'chidoan' | 'doanvien';
@@ -59,10 +60,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             .replace(/^[._-]+|[._-]+$/g, '')
             .trim();
           if (!clean) return 'Chi đoàn';
-          clean = clean.toUpperCase();
-          if (clean === '25DTVDKD') return '25DTV_DKD';
-          if (clean === '26DTVDKD') return '26DTV_DKD';
-          return clean;
+          const canonical = normalizeCanonicalBranch(clean);
+          return canonical || clean.toUpperCase();
         };
 
         const extractedBranch = isBranchAccount ? getBranchFromEmail(userEmailLower) : '';
@@ -86,19 +85,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               role = data.role || 'doanvien';
             }
             
+            const rawBranch = (data.branch || '').trim();
+            const canonicalDataBranch = normalizeCanonicalBranch(rawBranch);
+
+            const defaultBranch = isDefaultAdmin 
+              ? 'Đoàn khoa ĐTVT'
+              : isBranchAccount 
+              ? (extractedBranch || canonicalDataBranch || 'Chi đoàn')
+              : (rawBranch === 'Đoàn khoa ĐTVT' || rawBranch === 'Đoàn khoa ĐT-VT' ? '' : (canonicalDataBranch || rawBranch));
+
             const defaultName = isDefaultAdmin 
               ? (data.name && data.name !== 'Admin ĐTVT' ? data.name : 'BCH Đoàn khoa ĐTVT')
               : isBranchAccount
-              ? (data.name && data.name !== 'Đoàn viên' ? data.name : `BCH Chi đoàn ${extractedBranch || data.branch || ''}`)
+              ? (data.name && data.name !== 'Đoàn viên' ? data.name : `BCH Chi đoàn ${defaultBranch}`)
               : (data.name || firebaseUser.displayName || 'Đoàn viên');
             
             const defaultCommitteeRole = data.committeeRole || (isBranchAccount ? 'Chi đoàn' : '');
             const defaultBranchRole = data.branchRole || '';
-            const defaultBranch = isDefaultAdmin 
-              ? 'Đoàn khoa ĐTVT'
-              : isBranchAccount 
-              ? (extractedBranch || data.branch || 'Chi đoàn')
-              : (data.branch === 'Đoàn khoa ĐTVT' || data.branch === 'Đoàn khoa ĐT-VT' ? '' : (data.branch || ''));
 
             appUser = {
               ...firebaseUser,
