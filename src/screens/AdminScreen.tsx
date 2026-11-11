@@ -68,6 +68,185 @@ interface Activity {
   allowedScanBranches?: string[];
 }
 
+function normalizeAndDeduplicateUsers(rawUsers: any[]): {
+  cleanedUsers: any[];
+  duplicateDocIdsToDelete: string[];
+} {
+  const duplicateDocIdsToDelete = new Set<string>();
+
+  // Bước 1: Chuẩn hóa từng bản ghi TRƯỚC KHI lọc trùng (đảo lại Họ tên / MSSV bị ngược, chuẩn hóa tên Chi đoàn)
+  const preNormalized = rawUsers.map((usr) => {
+    let cTerm = usr.committeeTerm;
+    let cPeriod = usr.committeePeriod;
+    let bTerm = usr.branchTerm;
+
+    let uName = repairVietnameseName(String(usr.name || '').trim());
+    let uMssv = String(usr.mssv || '').trim();
+    let uUsername = String(usr.username || '').trim();
+    let uEmail = String(usr.email || '').trim();
+    const uRole = usr.role || 'doanvien';
+
+    const nameIsNumeric = /^\d{6,10}$/.test(uName);
+    const mssvIsNumeric = /^\d{6,10}$/.test(uMssv);
+    const mssvHasText = !mssvIsNumeric && uMssv.length > 0;
+
+    if (nameIsNumeric && mssvHasText) {
+      const actualName = repairVietnameseName(uMssv);
+      const actualMssv = uName;
+      uName = actualName;
+      uMssv = actualMssv;
+      uUsername = actualMssv;
+    } else if (
+      uRole === 'doanvien' &&
+      mssvHasText &&
+      uMssv.includes(' ') &&
+      (!uName || uName === 'Đoàn viên' || uName.toLowerCase() === uMssv.toLowerCase())
+    ) {
+      uName = repairVietnameseName(uMssv);
+      uMssv = '';
+      uUsername = '';
+    }
+
+    if (!uMssv && /^\d{6,10}$/.test(uUsername)) {
+      uMssv = uUsername;
+    }
+
+    if (uEmail.toLowerCase().includes('@student.hcmus.edu.vn')) {
+      uEmail = '';
+    }
+
+    let uBranch = String(usr.branch || '').trim();
+    if (uBranch && uBranch !== 'Đoàn khoa ĐTVT') {
+      const canonical = normalizeCanonicalBranch(uBranch);
+      if (canonical) {
+        uBranch = canonical;
+      }
+    }
+
+    if (cTerm && isTermExpired(cTerm)) cTerm = null;
+    if (cPeriod && isTermExpired(cPeriod)) cPeriod = null;
+    if (bTerm && isTermExpired(bTerm)) bTerm = null;
+
+    return {
+      ...usr,
+      name: uName,
+      mssv: uMssv,
+      username: uUsername || uMssv,
+      email: uEmail,
+      branch: uBranch,
+      committeeTerm: cTerm,
+      committeePeriod: cPeriod,
+      branchTerm: bTerm
+    };
+  });
+
+  // Bước 2: Sắp xếp thứ tự ưu tiên:
+  // 0: Tài khoản Auth thật (!id.startsWith('profile_'))
+  // 1: Bản ghi chuẩn profile_<mssv> (id khớp với MSSV số)
+  // 2: Bản ghi cũ bị lưu ngược id (profile_<họ tên>)
+  const getPriority = (u: any): number => {
+    const idStr = String(u.id || '');
+    if (!idStr.startsWith('profile_')) return 0;
+    const mssvClean = String(u.mssv || '').trim().toLowerCase();
+    if (mssvClean && idStr.toLowerCase() === `profile_${mssvClean}`) return 1;
+    return 2;
+  };
+
+  const sortedUsers = [...preNormalized].sort((a, b) => getPriority(a) - getPriority(b));
+
+  const cleanedUsers: any[] = [];
+  const seenByMssv = new Map<string, any>();
+  const seenByEmail = new Map<string, any>();
+  const seenByNameBranch = new Map<string, any>();
+
+  const mergeMissingFields = (target: any, source: any) => {
+    if (!target.mssv && source.mssv) target.mssv = source.mssv;
+    if (!target.username && source.username) target.username = source.username;
+    if ((!target.name || target.name === 'Đoàn viên') && source.name && source.name !== 'Đoàn viên') {
+      target.name = source.name;
+    }
+    if (!target.email && source.email) target.email = source.email;
+    if (!target.branch && source.branch) target.branch = source.branch;
+    if (!target.committeeRole && source.committeeRole) {
+      target.committeeRole = source.committeeRole;
+      target.committeeTerm = source.committeeTerm;
+      target.committeePeriod = source.committeePeriod;
+    }
+    if (!target.branchRole && source.branchRole) {
+      target.branchRole = source.branchRole;
+      target.branchTerm = source.branchTerm;
+    }
+    if (!target.avatar && source.avatar) target.avatar = source.avatar;
+  };
+
+  for (const usr of sortedUsers) {
+    const idStr = String(usr.id || '');
+    const isPlaceholder = idStr.startsWith('profile_');
+    const mssvKey = String(usr.mssv || usr.username || '').toLowerCase().trim();
+    const emailKey = String(usr.email || '').toLowerCase().trim();
+    const nameKey = String(usr.name || '').toLowerCase().trim();
+    const branchKey = String(usr.branch || '').toLowerCase().trim();
+
+    // Bỏ qua dòng tiêu đề CSV bị import nhầm (nếu có)
+    if (
+      mssvKey === 'mssv' ||
+      mssvKey === 'mã số sv' ||
+      mssvKey === 'họ tên' ||
+      mssvKey === 'họ và tên' ||
+      nameKey === 'họ tên' ||
+      nameKey === 'họ và tên'
+    ) {
+      if (isPlaceholder) duplicateDocIdsToDelete.add(idStr);
+      continue;
+    }
+
+    // Kiểm tra trùng theo MSSV / Username
+    if (mssvKey && seenByMssv.has(mssvKey)) {
+      const existing = seenByMssv.get(mssvKey);
+      mergeMissingFields(existing, usr);
+      if (isPlaceholder && existing.id !== idStr) {
+        duplicateDocIdsToDelete.add(idStr);
+      }
+      continue;
+    }
+
+    // Kiểm tra trùng theo Email
+    if (emailKey && seenByEmail.has(emailKey)) {
+      const existing = seenByEmail.get(emailKey);
+      mergeMissingFields(existing, usr);
+      if (isPlaceholder && existing.id !== idStr) {
+        duplicateDocIdsToDelete.add(idStr);
+      }
+      continue;
+    }
+
+    // Kiểm tra trùng theo Họ tên + Chi đoàn (khi một trong 2 bản ghi bị khuyết MSSV chuẩn hoặc trùng cả tên + chi đoàn)
+    const nameBranchKey = nameKey && nameKey !== 'đoàn viên' && branchKey ? `${nameKey}__${branchKey}` : '';
+    if (usr.role !== 'chidoan' && usr.role !== 'admin' && nameBranchKey && seenByNameBranch.has(nameBranchKey)) {
+      const existing = seenByNameBranch.get(nameBranchKey);
+      const existingHasNumericMssv = /^\d{6,10}$/.test(String(existing.mssv || ''));
+      const currentHasNumericMssv = /^\d{6,10}$/.test(String(usr.mssv || ''));
+      if (!existingHasNumericMssv || !currentHasNumericMssv || existing.mssv === usr.mssv) {
+        mergeMissingFields(existing, usr);
+        if (isPlaceholder && existing.id !== idStr) {
+          duplicateDocIdsToDelete.add(idStr);
+        }
+        continue;
+      }
+    }
+
+    cleanedUsers.push(usr);
+    if (mssvKey) seenByMssv.set(mssvKey, usr);
+    if (emailKey) seenByEmail.set(emailKey, usr);
+    if (nameBranchKey) seenByNameBranch.set(nameBranchKey, usr);
+  }
+
+  return {
+    cleanedUsers,
+    duplicateDocIdsToDelete: Array.from(duplicateDocIdsToDelete)
+  };
+}
+
 export default function AdminScreen() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -300,24 +479,8 @@ export default function AdminScreen() {
       if (cachedUsers) {
         const parsed = JSON.parse(cachedUsers);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const normalized = parsed.map((u: any) => {
-            const nameIsNumeric = /^\d{6,10}$/.test(String(u.name || '').trim());
-            const mssvHasText = !/^\d{6,10}$/.test(String(u.mssv || '').trim()) && String(u.mssv || '').trim().length > 0;
-            if (nameIsNumeric && mssvHasText) {
-              return {
-                ...u,
-                name: u.mssv,
-                mssv: u.name,
-                username: u.name,
-                email: (u.email && u.email.includes('@student.hcmus.edu.vn')) ? '' : u.email
-              };
-            }
-            if (u.email && u.email.includes('@student.hcmus.edu.vn')) {
-              return { ...u, email: '' };
-            }
-            return u;
-          });
-          setUsersList(normalized);
+          const { cleanedUsers } = normalizeAndDeduplicateUsers(parsed);
+          setUsersList(cleanedUsers);
         }
       }
       const cachedActs = localStorage.getItem('cached_admin_activities');
@@ -1171,98 +1334,14 @@ export default function AdminScreen() {
       const snapshot = await getDocs(collection(db, 'users'));
       const rawUsers = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
 
-      // 1. Phân loại tài khoản đã đăng nhập thực tế (dùng Auth UID)
-      const activeUserMssvs = new Set<string>();
-      const activeUserEmails = new Set<string>();
-      
-      rawUsers.forEach(u => {
-        if (!u.id.startsWith('profile_')) {
-          const m = (u.mssv || u.username || '').toLowerCase().trim();
-          if (m) activeUserMssvs.add(m);
-          const email = (u.email || '').toLowerCase().trim();
-          if (email) activeUserEmails.add(email);
-        }
-      });
+      const { cleanedUsers, duplicateDocIdsToDelete } = normalizeAndDeduplicateUsers(rawUsers);
 
-      // 2. Lọc bỏ các bản ghi placeholder profile_ bị trùng lặp với tài khoản đã kích hoạt
-      const deduplicatedRaw: any[] = [];
-      const seenIdentity = new Set<string>();
-
-      // Sắp xếp: Ưu tiên tài khoản thật (Auth UID) đứng trước, placeholder profile_ đứng sau
-      const sortedUsers = [...rawUsers].sort((a, b) => {
-        const aIsProf = a.id.startsWith('profile_') ? 1 : 0;
-        const bIsProf = b.id.startsWith('profile_') ? 1 : 0;
-        return aIsProf - bIsProf;
-      });
-
-      for (const usr of sortedUsers) {
-        const isPlaceholder = usr.id.startsWith('profile_');
-        const mssvKey = (usr.mssv || usr.username || (isPlaceholder ? usr.id.replace('profile_', '') : '')).toLowerCase().trim();
-        const emailKey = (usr.email || '').toLowerCase().trim();
-
-        // Nếu là bản ghi tạm profile_ nhưng đoàn viên này đã đăng nhập tài khoản thật:
-        if (isPlaceholder && ((mssvKey && activeUserMssvs.has(mssvKey)) || (emailKey && activeUserEmails.has(emailKey)))) {
-          continue; // Bỏ qua, không đếm trùng vào danh sách và thống kê
-        }
-
-        // Kiểm tra tránh trùng lặp giữa các bản ghi placeholder với nhau
-        if (mssvKey) {
-          if (seenIdentity.has(mssvKey)) {
-            continue;
-          }
-          seenIdentity.add(mssvKey);
-        }
-
-        deduplicatedRaw.push(usr);
+      // Tự động dọn dẹp các bản ghi profile_ bị trùng lặp (ví dụ bản ghi bị đảo Họ tên/MSSV ở 26ICD) trên Firestore
+      if (duplicateDocIdsToDelete.length > 0) {
+        Promise.all(
+          duplicateDocIdsToDelete.map(dupId => deleteDoc(doc(db, 'users', dupId)).catch(() => {}))
+        ).catch(() => {});
       }
-
-      const cleanedUsers = deduplicatedRaw.map(usr => {
-        let cTerm = usr.committeeTerm;
-        let cPeriod = usr.committeePeriod;
-        let bTerm = usr.branchTerm;
-
-        let uName = String(usr.name || '').trim();
-        let uMssv = String(usr.mssv || '').trim();
-        let uUsername = String(usr.username || '').trim();
-        let uEmail = String(usr.email || '').trim();
-
-        // 1. Tự động chuẩn hóa nếu Họ tên và MSSV bị lưu ngược (Tên toàn số, MSSV có chữ cái)
-        const nameIsNumeric = /^\d{6,10}$/.test(uName);
-        const mssvHasText = !/^\d{6,10}$/.test(uMssv) && uMssv.length > 0;
-        if (nameIsNumeric && mssvHasText) {
-          const actualName = uMssv;
-          const actualMssv = uName;
-          uName = actualName;
-          uMssv = actualMssv;
-          uUsername = actualMssv;
-        }
-
-        // 2. Xóa bỏ email sinh viên ảo (@student.hcmus.edu.vn)
-        if (uEmail.toLowerCase().includes('@student.hcmus.edu.vn')) {
-          uEmail = '';
-        }
-
-        if (cTerm && isTermExpired(cTerm)) {
-          cTerm = null;
-        }
-        if (cPeriod && isTermExpired(cPeriod)) {
-          cPeriod = null;
-        }
-        if (bTerm && isTermExpired(bTerm)) {
-          bTerm = null;
-        }
-
-        return {
-          ...usr,
-          name: uName,
-          mssv: uMssv,
-          username: uUsername,
-          email: uEmail,
-          committeeTerm: cTerm,
-          committeePeriod: cPeriod,
-          branchTerm: bTerm
-        };
-      });
 
       if (cleanedUsers.length > 0) {
         setUsersList(cleanedUsers);
@@ -1846,12 +1925,15 @@ export default function AdminScreen() {
           });
 
           if (mssvColIdx === -1) {
-            // Default standard: STT (col 0), MSSV (col 1), Họ tên (col 2), Lớp (col 3)
-            mssvColIdx = 1;
-            nameColIdx = 2;
+            // Default standard: STT (col 0), Họ tên (col 1), MSSV (col 2), Lớp (col 3)
+            nameColIdx = 1;
+            mssvColIdx = 2;
             branchColIdx = 3;
           } else {
-            if (mssvColIdx === 1) {
+            if (mssvColIdx === 2) {
+              nameColIdx = 1;
+              branchColIdx = 3;
+            } else if (mssvColIdx === 1) {
               nameColIdx = 2;
               branchColIdx = 3;
             } else if (mssvColIdx === 0) {
@@ -1871,7 +1953,7 @@ export default function AdminScreen() {
           const row = dataRows[i];
           if (!row || row.length === 0) continue;
           const rawMssv = mssvColIdx >= 0 && row[mssvColIdx] ? String(row[mssvColIdx]).trim() : '';
-          const usernameStr = rawMssv.replace(/[\r\n\t]/g, '');
+          let usernameStr = rawMssv.replace(/[\r\n\t]/g, '');
           if (!usernameStr || usernameStr.length < 3) continue;
 
           let fullName = '';
@@ -1881,6 +1963,13 @@ export default function AdminScreen() {
             fullName = String(row[nameColIdx]).trim();
           }
 
+          // Tự động đảo lại nếu cột MSSV và Họ tên bị ngược trong file CSV
+          if (!/^\d{6,10}$/.test(usernameStr) && /^\d{6,10}$/.test(fullName)) {
+            const temp = usernameStr;
+            usernameStr = fullName;
+            fullName = temp;
+          }
+
           const newNameStr = repairVietnameseName(fullName) || 'Đoàn viên';
           const rawRole = roleColIdx >= 0 && row[roleColIdx] ? String(row[roleColIdx]).toLowerCase().trim() : 'doanvien';
           const newRoleStr: 'doanvien' | 'chidoan' = (rawRole.includes('chi đoàn') || rawRole.includes('chidoan')) ? 'chidoan' : 'doanvien';
@@ -1888,6 +1977,9 @@ export default function AdminScreen() {
           let newBranchStr = branchColIdx >= 0 && row[branchColIdx] ? String(row[branchColIdx]).trim() : '';
           if (!newBranchStr) {
             newBranchStr = isAdmin ? (selectedBranchFilter || newBranch.trim() || 'Chi đoàn') : (currentUser?.branch || 'Chi đoàn');
+          }
+          if (newBranchStr && newBranchStr !== 'Đoàn khoa ĐTVT') {
+            newBranchStr = normalizeCanonicalBranch(newBranchStr) || newBranchStr;
           }
 
           if (newBranchStr) branchesSet.add(newBranchStr);
@@ -2060,9 +2152,15 @@ export default function AdminScreen() {
   const confirmDeleteUser = async () => {
     if (!deletingUser) return;
     const nameStr = deletingUser.name || deletingUser.email || deletingUser.username || deletingUser.id;
+    const targetMssv = String(deletingUser.mssv || deletingUser.username || '').trim().toLowerCase();
     try {
       await deleteDoc(doc(db, 'users', deletingUser.id));
-      const remainingList = usersList.filter(item => item.id !== deletingUser.id);
+      if (targetMssv) {
+        deleteDoc(doc(db, 'users', `profile_${targetMssv}`)).catch(() => {});
+      }
+      const remainingList = usersList.filter(
+        item => item.id !== deletingUser.id && (!targetMssv || String(item.mssv || item.username || '').trim().toLowerCase() !== targetMssv)
+      );
       setUsersList(remainingList);
       
       const freshBch = remainingList.filter(
